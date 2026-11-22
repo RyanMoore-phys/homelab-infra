@@ -99,7 +99,7 @@ flowchart TB
 |---|---|---|---|
 | gateway | `router`, `slurm_nodes` | routing, NAT, dnsmasq, Tailscale subnet router + `tailscale serve`, node and GPU exporters, slurmd with the GPU, NFS client | baseline + `router` + `slurm` |
 | node0 | `lab_nodes`, `nfs_server`, `slurm_nodes` | NFS v4.2 server, slurmctld, slurmd, node_exporter, game server | baseline + `nfs_server` + `slurm` |
-| node1 | `lab_nodes`, `slurm_nodes` | Grafana, Prometheus, wiki (Docker Compose), Slurm job board, Actions runner, slurmd, NFS client | baseline + `slurm` |
+| node1 | `lab_nodes`, `slurm_nodes` | Grafana, Prometheus, wiki (Docker Compose), Slurm job board, Actions runners (one container per repository), slurmd, NFS client | baseline + `slurm` |
 | node2 | `lab_nodes`, `slurm_nodes` | slurmd, node_exporter, NFS client | baseline + `slurm` |
 
 *Baseline* = `auto_updates`, `ssh_hardening`, `authorized_keys`, `firewall`.

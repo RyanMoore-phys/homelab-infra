@@ -18,6 +18,10 @@ can run arbitrary code on them. This repository is public to showcase the work.
   request on the self-hosted runner, or targets it without an environment.
 * Output is masked and reduced to the recap; full logs stay on the runner host.
 
+* The runner is its own registration on node1 (label `homelab`), sharing the
+  machine and the container image with another repository's runner but
+  nothing else: separate work volume, no mounted keys.
+
 ## Consequences
 * The runner can still be abused by someone holding the owner's GitHub
   account; MFA on that account is part of the control.

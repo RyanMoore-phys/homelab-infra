@@ -64,8 +64,20 @@ jobs:
             | while read -r v; do echo "::add-mask::$v"; done || true
           echo "HOMELAB_DIR=$d" >> "$GITHUB_ENV"
 
-      - name: Install pinned Ansible and collections
-        run: make setup
+      # The runner image (shared recipe with another repository's runner) has no
+      # Python and no make, and its distro Python is too old for the pinned
+      # Ansible: install the repo's Python version into the runner tool cache.
+      - name: Python for Ansible
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version-file: .python-version
+
+      - name: Install pinned Ansible and collections (same steps as `make setup`)
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q --upgrade pip
+          .venv/bin/pip install -q -r requirements-dev.txt
+          .venv/bin/ansible-galaxy collection install -r requirements.yml -p .ansible/collections
 
       - name: Run the playbook (recap only in this log)
         env:
@@ -75,7 +87,11 @@ jobs:
           set -uo pipefail
           args=(-i "$HOMELAB_DIR/hosts.yml" playbooks/site.yml --limit "$LIMIT"
                 --private-key "$HOMELAB_DIR/id_deploy"
-                --ssh-common-args "-o UserKnownHostsFile=$HOMELAB_DIR/known_hosts -o StrictHostKeyChecking=yes")
+                # --ssh-EXTRA-args, written with "=": the inventory sets ssh COMMON args
+                # (HostKeyAlias) and inventory variables override CLI options, so common
+                # args from here would be dropped and host-key checking silently lost
+                # (the runner image's own ssh config turns it off). Tested both ways.
+                "--ssh-extra-args=-o UserKnownHostsFile=$HOMELAB_DIR/known_hosts -o StrictHostKeyChecking=yes")
           if [ "$MODE" = check ]; then args+=(--check); fi
           logdir="$HOME/homelab-deploy-logs"; mkdir -p "$logdir"; chmod 700 "$logdir"
           log="$logdir/$(date -u +%Y%m%dT%H%M%SZ)-$MODE.log"

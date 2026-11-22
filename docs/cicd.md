@@ -10,7 +10,7 @@ sequenceDiagram
     participant GH as GitHub
     participant Hosted as GitHub-hosted runner
     participant Env as Environment "homelab"
-    participant Runner as Self-hosted runner<br/>node1 · label homelab
+    participant Runner as Self-hosted runner<br/>node1 container · label homelab
     participant Lab as Lab hosts
 
     rect rgba(21, 101, 192, 0.10)
@@ -29,7 +29,7 @@ sequenceDiagram
     Owner->>Env: approve
     Env-->>GH: approved
     GH->>Runner: job and environment secrets
-    Note over Runner: registration pending, see the runner runbook
+    Note over Runner: Python installed per job (setup-python)
     Runner->>Runner: write inventory, key, known_hosts (mode 0600)<br/>::add-mask:: every address
     Runner->>Lab: ansible-playbook over SSH by lab address<br/>StrictHostKeyChecking=yes
     Lab-->>Runner: task results
@@ -56,7 +56,8 @@ See [ADR-0005](decisions/0005-self-hosted-runner-on-a-public-repo.md) and the
 ## Status
 
 * `ci.yml` runs from the first push.
-* `deploy.yml` is ready; the self-hosted runner for this repository, the
-  `deploy` user and the `homelab` environment are set up by following the
-  [runner runbook](runbooks/self-hosted-runner.md). Until then the lab is
-  managed from the owner's laptop with `make check` / `make apply`.
+* `deploy.yml` is ready. Its runner is staged on node1 (`~/homelab-runner`,
+  label `homelab`) and registers with a one-time token; the `deploy` user and
+  the `homelab` environment's secrets follow the
+  [runner runbook](runbooks/self-hosted-runner.md). Until all three exist, the
+  lab is managed from the owner's laptop with `make check-host` / `make apply-host`.
