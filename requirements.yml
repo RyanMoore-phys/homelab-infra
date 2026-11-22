@@ -1,0 +1,7 @@
+# Exact versions so every machine (laptop, CI, runner) resolves the same code.
+# Dependabot does not cover Galaxy; bump these by hand and run `make test`.
+collections:
+  - name: community.general
+    version: "11.4.10"
+  - name: ansible.posix
+    version: "2.2.2"

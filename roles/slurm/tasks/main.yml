@@ -1,0 +1,36 @@
+- name: Write slurm.conf (identical on every node)
+  ansible.builtin.template:
+    src: slurm.conf.j2
+    dest: /etc/slurm/slurm.conf
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  notify:
+    - Restart slurmd
+    - Reconfigure slurmctld
+
+- name: Write cgroup.conf
+  ansible.builtin.template:
+    src: cgroup.conf.j2
+    dest: /etc/slurm/cgroup.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart slurmd
+
+- name: Write gres.conf on nodes that declare a GRES (e.g. a GPU)
+  ansible.builtin.template:
+    src: gres.conf.j2
+    dest: /etc/slurm/gres.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: slurm_gres_conf | default([]) | length > 0
+  notify: Restart slurmd
+
+- name: Keep slurmd running
+  ansible.builtin.service:
+    name: slurmd
+    state: started
+    enabled: true

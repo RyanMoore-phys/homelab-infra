@@ -1,0 +1,24 @@
+# Real inventory and anything host-specific never leaves this machine.
+inventory/*
+!inventory/hosts.example.yml
+!inventory/README.md
+
+# Keys, secrets, vault material
+*.key
+*.pem
+id_*
+!**/id_*.example
+.env
+.env.*
+*.vault
+.vault_pass*
+known_hosts*
+
+# Tooling
+*.retry
+.venv/
+venv/
+__pycache__/
+.ansible/
+.DS_Store
+._*

@@ -1,0 +1,9 @@
+- name: Install SSH public keys, each limited to the addresses it may come from
+  ansible.posix.authorized_key:
+    user: "{{ item.user }}"
+    key: "{{ item.key }}"
+    key_options: "{{ ('from=\"' ~ (item.from | join(',')) ~ '\"') if (item.from | default([]) | length > 0) else omit }}"
+    state: present
+  loop: "{{ authorized_keys }}"
+  loop_control:
+    label: "{{ item.user }}: {{ item.key.split(' ')[-1] }}"

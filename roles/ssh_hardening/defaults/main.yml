@@ -1,0 +1,10 @@
+# Written to /etc/ssh/sshd_config.d/00-hardening.conf. sshd keeps the FIRST
+# value it reads for a keyword, and the drop-ins are read in name order, so
+# "00-" wins over cloud-init's "50-cloud-init.conf" (which turns passwords on).
+ssh_hardening_settings:
+  PasswordAuthentication: "no"
+  KbdInteractiveAuthentication: "no"
+  PermitEmptyPasswords: "no"
+  X11Forwarding: "no"
+  PermitRootLogin: prohibit-password
+  MaxAuthTries: 3

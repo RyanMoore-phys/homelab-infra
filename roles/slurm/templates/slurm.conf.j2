@@ -1,0 +1,38 @@
+ClusterName={{ slurm_cluster_name }}
+SlurmctldHost={{ slurm_controller }}({{ hostvars[slurm_controller].lab_ip }})
+SlurmUser=slurm
+AuthType=auth/munge
+CredType=cred/munge
+
+SlurmctldPort={{ slurm_ctld_port }}
+SlurmdPort={{ slurm_d_port }}
+SrunPortRange={{ slurm_srun_ports }}
+
+StateSaveLocation=/var/spool/slurmctld
+SlurmdSpoolDir=/var/spool/slurmd
+SlurmctldLogFile=/var/log/slurm/slurmctld.log
+SlurmdLogFile=/var/log/slurm/slurmd.log
+
+SchedulerType=sched/backfill
+SelectType=select/cons_tres
+SelectTypeParameters=CR_CPU_Memory
+
+ProctrackType=proctrack/cgroup
+TaskPlugin=task/cgroup,task/affinity
+JobAcctGatherType=jobacct_gather/linux
+JobAcctGatherFrequency=30
+AccountingStorageType=accounting_storage/none
+
+ReturnToService={{ slurm_return_to_service }}
+SlurmctldTimeout={{ slurm_ctld_timeout }}
+SlurmdTimeout={{ slurm_d_timeout }}
+{% if slurm_gres_types | default('') %}
+GresTypes={{ slurm_gres_types }}
+{% endif %}
+
+{% for n in groups['slurm_nodes'] %}
+{% set h = hostvars[n] %}
+NodeName={{ n }} NodeAddr={{ h.lab_ip }} CPUs={{ h.slurm_cpus }} Boards=1 SocketsPerBoard=1 CoresPerSocket={{ h.slurm_cores_per_socket }} ThreadsPerCore={{ h.slurm_threads_per_core }} RealMemory={{ h.slurm_real_memory }}{% if h.slurm_mem_spec_limit | default(0) %} MemSpecLimit={{ h.slurm_mem_spec_limit }}{% endif %}{% if h.slurm_gres | default('') %} Gres={{ h.slurm_gres }}{% endif %} State={{ h.slurm_state | default('UNKNOWN') }}
+{% endfor %}
+
+PartitionName={{ slurm_partition.name }} Nodes={{ groups['slurm_nodes'] | join(',') }} Default=YES MaxTime={{ slurm_partition.max_time }} DefaultTime={{ slurm_partition.default_time }} State=UP OverSubscribe=NO DefMemPerCPU={{ slurm_partition.def_mem_per_cpu }}{% if slurm_partition.max_mem_per_node | default('') %} MaxMemPerNode={{ slurm_partition.max_mem_per_node }}{% endif %}

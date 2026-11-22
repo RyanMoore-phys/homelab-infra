@@ -1,0 +1,114 @@
+- name: Forward IPv4 packets between interfaces
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    sysctl_set: true
+    state: present
+
+- name: Drop routed traffic unless a rule allows it
+  ansible.builtin.lineinfile:
+    path: /etc/default/ufw
+    regexp: '^DEFAULT_FORWARD_POLICY='
+    line: 'DEFAULT_FORWARD_POLICY="DROP"'
+  notify: Reload ufw
+
+- name: Look for an existing NAT rule (hand-written ones are respected)
+  ansible.builtin.command: grep -qxF -- "-A POSTROUTING -o {{ wan_if }} -j MASQUERADE" /etc/ufw/before.rules
+  register: router_nat_present
+  changed_when: false
+  failed_when: router_nat_present.rc not in [0, 1]
+  check_mode: false
+
+- name: NAT the lab out of the upstream interface
+  ansible.builtin.blockinfile:
+    path: /etc/ufw/before.rules
+    insertbefore: BOF
+    marker: "# {mark} homelab-infra NAT"
+    block: |
+      *nat
+      :POSTROUTING ACCEPT [0:0]
+      -A POSTROUTING -o {{ wan_if }} -j MASQUERADE
+      COMMIT
+  when: router_nat_present.rc != 0
+  notify: Reload ufw
+
+# Rule order matters for routed traffic: ufw checks rules top-down, first match wins.
+- name: Deny lab -> home network (inserted at the top)
+  community.general.ufw:
+    rule: deny
+    route: true
+    interface_in: "{{ lan_if }}"
+    interface_out: "{{ wan_if }}"
+    to_ip: "{{ home_cidr }}"
+    insert: 1
+    comment: lab may not reach home LAN 2026-11-21
+  when: router_block_home_lan
+
+- name: Except Tailscale's direct paths (UDP from each node's WireGuard port), above the deny
+  community.general.ufw:
+    rule: allow
+    route: true
+    interface_in: "{{ lan_if }}"
+    interface_out: "{{ wan_if }}"
+    from_ip: "{{ lab_cidr }}"
+    from_port: "{{ firewall_tailscale_port | default(41641) | string }}"
+    to_ip: "{{ home_cidr }}"
+    proto: udp
+    insert: 1
+    comment: tailscale direct paths 2026-11-21
+  when: router_block_home_lan
+
+- name: Lab -> internet
+  community.general.ufw:
+    rule: allow
+    route: true
+    interface_in: "{{ lan_if }}"
+    interface_out: "{{ wan_if }}"
+
+- name: Tailnet -> lab (this host is the Tailscale subnet router for the lab)
+  community.general.ufw:
+    rule: allow
+    route: true
+    interface_in: "{{ firewall_tailscale_if | default('tailscale0') }}"
+    interface_out: "{{ lan_if }}"
+
+- name: Set dnsmasq options for the lab
+  ansible.builtin.lineinfile:
+    path: /etc/dnsmasq.conf
+    regexp: "^{{ item.regexp }}"
+    line: "{{ item.line }}"
+  loop:
+    - {regexp: 'interface=', line: "interface={{ lan_if }}"}
+    - {regexp: 'bind-dynamic', line: bind-dynamic}
+    - {regexp: 'no-resolv', line: no-resolv}
+  notify: Restart dnsmasq
+
+- name: Set dnsmasq upstream servers
+  ansible.builtin.lineinfile:
+    path: /etc/dnsmasq.conf
+    line: "server={{ item }}"
+  loop: "{{ router_dns_upstreams }}"
+  notify: Restart dnsmasq
+
+- name: Read what the gateway already publishes on the tailnet
+  ansible.builtin.command: tailscale serve status --json
+  register: router_serve_status
+  changed_when: false
+  check_mode: false
+  when: router_tailscale_serve | length > 0
+
+- name: Index the published services as port=target
+  ansible.builtin.set_fact:
+    router_serve_have: "{{ router_serve_have | default([]) + [(item.key | regex_replace('^.*:', '')) ~ '=' ~ (item.value.Handlers['/'].Proxy | default(''))] }}"
+  loop: "{{ (router_serve_status.stdout | default('{}', true) | from_json).get('Web', {}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key | regex_replace('^.*:', '') }}"
+  when: router_tailscale_serve | length > 0
+
+- name: Publish lab web services on the tailnet (HTTPS, tailnet only)
+  ansible.builtin.command: "tailscale serve --bg --https={{ item.https_port }} {{ item.target }}"
+  loop: "{{ router_tailscale_serve }}"
+  loop_control:
+    label: "{{ item.https_port }}"
+  when: ((item.https_port | string) ~ '=' ~ item.target) not in (router_serve_have | default([]))
+  changed_when: true

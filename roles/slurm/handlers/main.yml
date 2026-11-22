@@ -1,0 +1,9 @@
+- name: Restart slurmd
+  ansible.builtin.service:
+    name: slurmd
+    state: restarted
+
+- name: Reconfigure slurmctld
+  ansible.builtin.command: scontrol reconfigure
+  changed_when: true
+  when: inventory_hostname == slurm_controller

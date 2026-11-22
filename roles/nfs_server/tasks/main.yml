@@ -1,0 +1,26 @@
+- name: Install the NFS server
+  ansible.builtin.apt:
+    name: nfs-kernel-server
+    state: present
+
+- name: Write one exports file per share
+  ansible.builtin.template:
+    src: share.exports.j2
+    dest: "/etc/exports.d/{{ item.name }}.exports"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ nfs_exports }}"
+  loop_control:
+    label: "{{ item.name }}"
+  notify: Re-export NFS shares
+
+- name: Refuse exports open to everyone
+  ansible.builtin.assert:
+    that:
+      - item.1.host not in ['*', '0.0.0.0/0']
+    fail_msg: "{{ item.0.name }}: export to '{{ item.1.host }}' is open to everyone"
+    quiet: true
+  loop: "{{ nfs_exports | subelements('clients') }}"
+  loop_control:
+    label: "{{ item.0.name }}"

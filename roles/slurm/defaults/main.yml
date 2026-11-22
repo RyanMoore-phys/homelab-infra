@@ -1,0 +1,35 @@
+# The same slurm.conf must be on every node; this role writes it everywhere.
+# The munge key (/etc/munge/munge.key) is a SECRET shared by all nodes. It is
+# never stored here: copy it once by hand (see docs/runbooks/slurm.md).
+slurm_cluster_name: cluster
+slurm_controller: ""            # inventory hostname of the slurmctld host
+slurm_ctld_port: 6817
+slurm_d_port: 6818
+slurm_srun_ports: 60001-60100
+slurm_return_to_service: 1
+slurm_ctld_timeout: 120
+slurm_d_timeout: 300
+slurm_partition:
+  name: compute
+  max_time: "7-00:00:00"
+  default_time: "01:00:00"
+  def_mem_per_cpu: 1000
+  max_mem_per_node: 6000
+# Per node, in the inventory: slurm_cpus, slurm_cores_per_socket,
+# slurm_threads_per_core, slurm_real_memory (MB, set a little below the real
+# amount), and optionally slurm_state (default UNKNOWN),
+# slurm_mem_spec_limit (MB held back from jobs for the OS and the node's own
+# services; needs ConstrainRAMSpace, set below) and slurm_gres (e.g. "gpu:rtx5050:1")
+# with slurm_gres_conf (lines of that node's gres.conf, e.g.
+# ["Name=gpu Type=rtx5050 File=/dev/nvidia0"]). A node without them is unchanged.
+# Cluster-wide: slurm_gres_types (e.g. "gpu") once any node has a GRES.
+# slurm_partition.max_mem_per_node: a per-job memory cap on every node; leave
+# it empty to cap a job only by its node's RealMemory (minus MemSpecLimit).
+slurm_cgroup:
+  CgroupPlugin: cgroup/v2
+  ConstrainCores: "yes"
+  ConstrainRAMSpace: "yes"
+  AllowedRAMSpace: 100
+  ConstrainSwapSpace: "yes"
+  AllowedSwapSpace: 0
+slurm_gres_types: ""

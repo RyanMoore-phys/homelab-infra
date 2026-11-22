@@ -1,0 +1,11 @@
+- name: Check the full sshd configuration
+  ansible.builtin.command: /usr/sbin/sshd -t
+  changed_when: false
+  listen: Reload sshd
+
+# reload, not restart: open sessions stay connected
+- name: Reload the ssh service
+  ansible.builtin.service:
+    name: ssh
+    state: reloaded
+  listen: Reload sshd

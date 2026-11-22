@@ -1,0 +1,24 @@
+# Whole lab. Safe to run in check mode at any time:
+#   ansible-playbook playbooks/site.yml --check
+- name: Baseline for every machine
+  hosts: all
+  roles:
+    - auto_updates
+    - ssh_hardening
+    - authorized_keys
+    - firewall
+
+- name: Gateway between the lab and the home network
+  hosts: router
+  roles:
+    - router
+
+- name: Shared storage
+  hosts: nfs_server
+  roles:
+    - nfs_server
+
+- name: Slurm cluster
+  hosts: slurm_nodes
+  roles:
+    - slurm

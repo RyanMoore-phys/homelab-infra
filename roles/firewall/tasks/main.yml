@@ -1,0 +1,49 @@
+- name: Default policies (incoming deny, outgoing allow, routed deny)
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    default: "{{ item.policy }}"
+  loop:
+    - {direction: incoming, policy: deny}
+    - {direction: outgoing, policy: allow}
+    - {direction: routed, policy: deny}
+
+- name: Allow everything arriving over the tailnet (every device on it is the owner's)
+  community.general.ufw:
+    rule: allow
+    direction: in
+    interface: "{{ firewall_tailscale_if }}"
+  when: firewall_tailscale
+
+- name: Allow Tailscale's WireGuard port, so peers can connect directly
+  community.general.ufw:
+    rule: allow
+    port: "{{ firewall_tailscale_port | string }}"
+    proto: udp
+  when: firewall_tailscale
+
+- name: Let the lab nodes reach each other on every port
+  community.general.ufw:
+    rule: allow
+    direction: in
+    interface: "{{ lan_if }}"
+    from_ip: "{{ lab_cidr }}"
+    comment: lab trust 2026-11-21
+  when: firewall_trust_lab
+
+- name: Host-specific rules
+  community.general.ufw:
+    rule: "{{ item.rule | default('allow') }}"
+    direction: in
+    interface: "{{ item.interface | default(omit) }}"
+    from_ip: "{{ item.from | default('any') }}"
+    port: "{{ item.port }}"
+    proto: "{{ item.proto | default('any') }}"
+    comment: "{{ item.comment | default(omit) }}"
+  loop: "{{ firewall_rules }}"
+  loop_control:
+    label: "{{ item.port }}/{{ item.proto | default('any') }}"
+
+- name: Turn the firewall on
+  community.general.ufw:
+    state: enabled
+    logging: "low"

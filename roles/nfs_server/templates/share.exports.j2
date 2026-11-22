@@ -1,0 +1,2 @@
+{{ item.path }} {% for c in item.clients %}{{ c.host }}({{ c.options }}){{ ' ' if not loop.last else '' }}{% endfor %}
+

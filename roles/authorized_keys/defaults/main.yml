@@ -1,0 +1,10 @@
+# Per host, in the (private) inventory:
+#   authorized_keys:
+#     - user: admin
+#       key: "ssh-ed25519 <public key> laptop"
+#       from: []                    # empty = usable from anywhere (your own key)
+#     - user: admin
+#       key: "ssh-ed25519 <public key> gateway"
+#       from: [192.0.2.1]           # a stolen copy is useless anywhere else
+# Keys that are not listed are left alone; remove an old key by hand.
+authorized_keys: []

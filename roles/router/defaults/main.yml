@@ -1,0 +1,15 @@
+# The gateway has two interfaces: lan_if (lab switch) and wan_if (upstream /
+# home network). The lab reaches the internet through NAT on wan_if, but may
+# not open connections to anything on the home network itself, except UDP from
+# Tailscale's port, so nodes keep direct WireGuard paths to tailnet devices that
+# sit on the home network.
+router_block_home_lan: true
+# dnsmasq answers DNS for the lab only (no DHCP; nodes use static addresses).
+router_dns_upstreams: [1.1.1.1, 8.8.8.8]
+# Lab web services the gateway publishes on the tailnet over HTTPS (tailnet
+# certificate, tailnet-only). The gateway is the normal way in; the nodes'
+# own Tailscale clients are a fallback.
+#   router_tailscale_serve:
+#     - {https_port: 443, target: "http://192.0.2.12:8080"}    # wiki on node1
+#     - {https_port: 8443, target: "http://192.0.2.12:3000"}   # Grafana on node1
+router_tailscale_serve: []

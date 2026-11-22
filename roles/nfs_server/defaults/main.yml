@@ -1,0 +1,8 @@
+# In the private inventory:
+#   nfs_exports:
+#     - name: openmc                      # -> /etc/exports.d/openmc.exports
+#       path: /srv/openmc
+#       clients:
+#         - {host: 192.0.2.12, options: "rw,sync,no_subtree_check,root_squash"}
+# Always name clients one by one; never export to a whole subnet or "*".
+nfs_exports: []

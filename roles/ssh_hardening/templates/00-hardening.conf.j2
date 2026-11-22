@@ -1,0 +1,4 @@
+# Hardening (2026-11-21). Read before 50-cloud-init.conf; sshd keeps the first value it reads.
+{% for key, value in ssh_hardening_settings.items() %}
+{{ key }} {{ value }}
+{% endfor %}

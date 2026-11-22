@@ -1,0 +1,13 @@
+# Interface names and the lab subnet come from the private inventory.
+# Every machine runs Tailscale (ADR-0002): the gateway is the normal way in,
+# each node's own client is a direct fallback. Tailscale's ts-input chain
+# accepts this traffic before ufw anyway; the rules keep ufw's view complete.
+firewall_tailscale: true
+firewall_tailscale_if: tailscale0
+firewall_tailscale_port: 41641
+# Lab nodes trust each other completely (NFS, Slurm, srun, MPI).
+firewall_trust_lab: false
+# Extra rules for one host, e.g. exporters the gateway serves to the lab:
+#   firewall_rules:
+#     - {port: "9100", proto: tcp, from: "{{ lab_cidr }}", interface: "{{ lan_if }}"}
+firewall_rules: []

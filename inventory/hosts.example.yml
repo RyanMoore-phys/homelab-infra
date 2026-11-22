@@ -1,0 +1,79 @@
+# Copy to inventory/hosts.yml (gitignored) and fill in your own values.
+# Every address below is from the RFC 5737 documentation ranges.
+all:
+  vars:
+    ansible_user: admin                 # your login on every machine
+    lab_cidr: 192.0.2.0/24              # the lab switch
+    home_cidr: 198.51.100.0/24          # the upstream / home network
+    my_laptop_key: "ssh-ed25519 <your laptop public key> laptop"
+    gateway_key: "ssh-ed25519 <gateway public key> gateway"
+  children:
+    router:
+      hosts:
+        gateway:
+          ansible_host: gateway         # its Tailscale MagicDNS name (the entry point)
+          lab_ip: 192.0.2.1
+          lan_if: eth1
+          wan_if: wlan0
+          router_tailscale_serve:       # lab web services published on the tailnet
+            - {https_port: 443, target: "http://192.0.2.12:8080"}    # wiki
+            - {https_port: 8443, target: "http://192.0.2.12:3000"}   # Grafana
+          firewall_rules:
+            - {port: "22", proto: tcp, from: "192.0.2.0/24", interface: eth1}
+            - {port: "53", from: "192.0.2.0/24", interface: eth1}
+            - {port: "9100", proto: tcp, from: "192.0.2.0/24", interface: eth1}
+            # ADR-0007: the gateway is also a Slurm node; only the controller may reach its slurmd
+            - {port: "6818", proto: tcp, from: "192.0.2.11", interface: eth1, comment: "slurmd from the controller (ADR-0007)"}
+          # ADR-0007: Slurm compute node, uncapped, 2 GB held back for routing, its GPU schedulable
+          slurm_cpus: 12
+          slurm_cores_per_socket: 6
+          slurm_threads_per_core: 2
+          slurm_real_memory: 15000
+          slurm_mem_spec_limit: 2048
+          slurm_gres: "gpu:rtx5050:1"
+          slurm_gres_conf: ["Name=gpu Type=rtx5050 File=/dev/nvidia0"]
+          authorized_keys:
+            - {user: admin, key: "{{ my_laptop_key }}"}
+    lab_nodes:
+      vars:
+        # Reached by lab address through the gateway's subnet route: the normal
+        # path (their own Tailscale clients are a fallback). From inside the lab,
+        # e.g. a CI runner, the same address works.
+        ansible_host: "{{ lab_ip }}"
+        ansible_ssh_common_args: "-o HostKeyAlias={{ inventory_hostname }}"
+        # Ubuntu 26.04's default sudo is sudo-rs, which ignores Ansible's prompt (-p), so --ask-become-pass timed out
+        # ("waiting for privilege escalation prompt"); the classic sudo is still installed as sudo.ws
+        ansible_become_exe: sudo.ws
+        firewall_trust_lab: true
+        slurm_cpus: 4
+        slurm_cores_per_socket: 2
+        slurm_threads_per_core: 2
+        slurm_real_memory: 6000
+        authorized_keys:
+          - {user: admin, key: "{{ my_laptop_key }}"}
+          - {user: admin, key: "{{ gateway_key }}", from: ["192.0.2.1"]}
+      hosts:
+        node0: {lab_ip: 192.0.2.11, lan_if: eth0}
+        node1: {lab_ip: 192.0.2.12, lan_if: eth0}
+        node2: {lab_ip: 192.0.2.13, lan_if: eth0}
+    nfs_server:
+      hosts:
+        node0:
+          nfs_exports:
+            - name: data
+              path: /srv/data
+              clients:
+                - {host: 192.0.2.12, options: "rw,sync,no_subtree_check,root_squash"}
+                - {host: 192.0.2.13, options: "rw,sync,no_subtree_check,root_squash"}
+                - {host: 192.0.2.1, options: "rw,sync,no_subtree_check,root_squash"}   # the gateway (ADR-0007)
+    slurm_nodes:
+      vars:
+        slurm_cluster_name: lab
+        slurm_controller: node0
+        slurm_gres_types: gpu
+        # ADR-0007: no cluster-wide per-job memory cap; each node is bounded by its RealMemory
+        slurm_partition: {name: compute, max_time: "7-00:00:00", default_time: "01:00:00", def_mem_per_cpu: 1000, max_mem_per_node: ""}
+      hosts:
+        gateway: {}
+      children:
+        lab_nodes:

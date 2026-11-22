@@ -1,0 +1,8 @@
+profile: production
+exclude_paths:
+  - .venv/
+  - .ansible/
+  - .github/
+  - inventory/hosts.yml
+skip_list:
+  - var-naming[no-role-prefix]

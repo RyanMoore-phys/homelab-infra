@@ -1,0 +1,53 @@
+# Runs on GitHub-hosted runners ONLY. Pull requests (including from forks) get
+# a read-only token and never touch the lab.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guards:
+    name: secrets and private-data guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0            # scan the whole history, not just the tip
+          persist-credentials: false
+      - name: No private network data in tracked files
+        run: scripts/check-private-data.sh
+      - name: Self-hosted runner only behind workflow_dispatch + environment
+        run: scripts/check-workflows.sh
+      - name: Secret scan, full git history (gitleaks)
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.21.2 detect --source /repo --redact --no-banner --verbose
+      - name: Shellcheck
+        run: shellcheck scripts/*.sh
+
+  lint:
+    name: ansible lint and syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version-file: .python-version
+      - name: Install pinned tools and collections
+        run: make setup
+      - name: yamllint + ansible-lint
+        run: make lint
+      - name: Syntax check against the example inventory
+        run: make syntax
