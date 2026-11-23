@@ -22,3 +22,6 @@ __pycache__/
 .ansible/
 .DS_Store
 ._*
+
+# The runner's private files (inventory and known_hosts copies)
+runner/private/

@@ -7,6 +7,7 @@ all:
     home_cidr: 198.51.100.0/24          # the upstream / home network
     my_laptop_key: "ssh-ed25519 <your laptop public key> laptop"
     gateway_key: "ssh-ed25519 <gateway public key> gateway"
+    ci_runner_key: "ssh-ed25519 <runner public key> ci-runner"   # mounted into the runner container on node1
   children:
     router:
       hosts:
@@ -34,6 +35,7 @@ all:
           slurm_gres_conf: ["Name=gpu Type=rtx5050 File=/dev/nvidia0"]
           authorized_keys:
             - {user: admin, key: "{{ my_laptop_key }}"}
+            - {user: admin, key: "{{ ci_runner_key }}", from: ["192.0.2.12"]}
     lab_nodes:
       vars:
         # Reached by lab address through the gateway's subnet route: the normal
@@ -52,9 +54,19 @@ all:
         authorized_keys:
           - {user: admin, key: "{{ my_laptop_key }}"}
           - {user: admin, key: "{{ gateway_key }}", from: ["192.0.2.1"]}
+          - {user: admin, key: "{{ ci_runner_key }}", from: "{{ ci_runner_from }}"}
+        # Where the CI runner key may come from: the runner host
+        ci_runner_from: ["192.0.2.12"]
+        # CI runs Ansible unattended as this account (ADR-0005); the gateway
+        # already has password-free sudo for it
+        sudo_nopasswd_users: [admin]
       hosts:
         node0: {lab_ip: 192.0.2.11, lan_if: eth0}
-        node1: {lab_ip: 192.0.2.12, lan_if: eth0}
+        # The runner container on the runner host reaches that host from its Docker
+        # bridge address, not the lab address: also accept the host's Docker networks
+        # there (Docker's default pool). Off that host no TCP handshake can complete
+        # from them. 198.51.100.0/24 stands in for that range here.
+        node1: {lab_ip: 192.0.2.12, lan_if: eth0, ci_runner_from: ["192.0.2.12", "198.51.100.0/24"]}
         node2: {lab_ip: 192.0.2.13, lan_if: eth0}
     nfs_server:
       hosts:

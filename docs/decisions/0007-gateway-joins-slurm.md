@@ -44,7 +44,7 @@ the gateway were killed by the kernel's OOM killer when too much ran at once.
   multi-node step started on node1, node2 or the gateway, or MPI spanning the
   gateway, is blocked. Opening 6818 and the srun range to `lab_cidr` on the
   gateway would lift this, at the cost of more lab → boundary-host access.
-* The CI deploy reads the inventory from the `HOMELAB_INVENTORY` secret: update
+* The CI deploy reads its own copy of the inventory on the runner host: update
   it after the inventory change, or a deploy would remove the gateway again.
 
 ## Rejected

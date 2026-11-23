@@ -104,10 +104,13 @@ srun -N4 hostname                                   # all four machines
 ```
 
 ## 8. Keep CI in step
-The deploy job reads the inventory from the `HOMELAB_INVENTORY` secret; replace
-it, or the next deploy removes `gateway` from Slurm again:
+The deploy job reads its own copy of the inventory on the runner host. Make the
+same change in `inventory/hosts.ci.yml` and copy it there, or the next deploy
+removes `gateway` from Slurm again (see the
+[runner runbook](self-hosted-runner.md) for the `docker cp` still needed
+until the runner container is next recreated):
 ```bash
-base64 -i inventory/hosts.yml | gh secret set HOMELAB_INVENTORY --env homelab
+scp inventory/hosts.ci.yml <admin>@node1:homelab-runner/private/hosts.yml
 ```
 
 ## Running GPU or memory-heavy work outside Slurm on `gateway`

@@ -1,0 +1,9 @@
+- name: Password-free sudo for the automation account(s), validated with visudo
+  ansible.builtin.copy:
+    content: "{{ item }} ALL=(ALL) NOPASSWD:ALL\n"
+    dest: "/etc/sudoers.d/90-{{ item }}-nopasswd"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+  loop: "{{ sudo_nopasswd_users }}"

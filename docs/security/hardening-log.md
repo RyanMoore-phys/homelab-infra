@@ -47,6 +47,19 @@ Decision: [ADR-0007](../decisions/0007-gateway-joins-slurm.md). Security-relevan
 | The gateway mounts the share | NFS export names it; mounted with `nofail` so a missing share never blocks boot | `/etc/fstab`, `findmnt` |
 | sudo-rs on the nodes broke Ansible's become prompt | `ansible_become_exe: sudo.ws` for the lab nodes | `make check-host` reaches every node |
 
+## 2026-11-22: the CI deploy identity
+
+| Change | Control | Check |
+|---|---|---|
+| A second runner on node1 for this repository | own registration, own work volume, label `homelab` | registered and listening |
+| Its SSH key | created on node1, mounted read-only into the container, never uploaded to GitHub | `test -r` in the deploy job |
+| Who it logs in as | the owner's admin account, `from=` node1's lab address only | accepted from node1 on 4/4, refused from the gateway |
+| Unattended sudo | `sudo_nopasswd` role on the nodes (the gateway already had it), validated with `visudo` | `sudo -n true` and `sudo.ws -n true`: 4/4 |
+| Host-key checking in CI | `--ssh-extra-args=` (inventory SSH args override CLI common args); guard rule in `check-workflows.sh` | empty known_hosts refused, real key accepted |
+| A pull request could add a workflow that targets the runner | job-started hook on the runner: only `deploy.yml` on main, started by the owner; read-only and root-owned in the container | 11 cases: 1 allowed, 10 refused |
+| Private CI files in GitHub | none: key, inventory and known_hosts mounted read-only from node1; the environment secrets were never created | deploy job checks they are readable |
+| The runner could not log in to node1, its own host | the container reaches node1 from its Docker bridge address, so node1 also accepts the CI key from its own Docker networks (`ci_runner_from`, node1 only) | check mode from the container: 4/4 reached |
+
 ## Traps worth knowing
 
 1. **Docker publishes around ufw.** Bind every published port to an address.

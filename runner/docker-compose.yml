@@ -1,0 +1,34 @@
+# The self-hosted runner for this repository: one container on node1, in
+# ~/homelab-runner (a copy of this folder). See docs/runbooks/self-hosted-runner.md.
+#
+# Same image as the other repository's runner on node1, with its own
+# registration and work volume. Everything private is mounted READ-ONLY:
+#   * the runner's SSH key (created on node1, never uploaded to GitHub);
+#   * ./private: the inventory and known_hosts the deploy job uses
+#     (gitignored; copied from inventory/hosts.ci.yml and known_hosts.ci);
+#   * the job-started hook that fails every job except deploy.yml on main
+#     started by the owner (runner groups do this for organisations; personal
+#     accounts do not have them).
+#
+# Start / register: ./start.sh (asks for a one-time registration token).
+# Stop: docker compose stop (it then stays stopped across reboots).
+services:
+  runner:
+    image: skybot-runner-runner
+    container_name: homelab-runner
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/runner-hooks/job-started.sh
+    deploy:
+      resources:
+        limits: {cpus: "1.5", memory: 2G}
+        reservations: {cpus: "0.25", memory: 256M}
+    volumes:
+      - homelab_runner_work:/home/runner/_work
+      - ${HOME}/.ssh/homelab_deploy:/home/runner/.ssh/homelab_deploy:ro
+      - ./private:/home/runner/homelab:ro
+      - ./job-started.sh:/opt/runner-hooks/job-started.sh:ro
+
+volumes:
+  homelab_runner_work:

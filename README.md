@@ -135,7 +135,7 @@ flowchart LR
     owner(["owner"]) -->|"Run workflow on main"| gate{"environment<br/>approval"}
     gate -->|"approved"| deploy["<b>deploy</b> · self-hosted runner in the lab<br/>check by default · apply on request<br/>masked output · recap only"]
     deploy -->|"SSH · pinned host keys"| lab[("lab hosts")]
-    pr -.-x|"can never reach"| deploy
+    pr -.-x|"refused by the runner"| deploy
 
     classDef hosted fill:#e3f2fd,stroke:#1565c0,color:#1a1a1a
     classDef selfhosted fill:#ffebee,stroke:#c62828,stroke-width:2px,color:#1a1a1a
@@ -151,8 +151,11 @@ flowchart LR
     linkStyle 4 stroke:#c62828,stroke-width:2px,stroke-dasharray:5 4
 ```
 
-A pull request can never reach the self-hosted runner, and CI enforces that
-rule ([ADR-0005](docs/decisions/0005-self-hosted-runner-on-a-public-repo.md),
+A pull request cannot run on the self-hosted runner, even one that adds its
+own workflow: the runner's job-started hook refuses every job except the
+owner's manual deploy from `main`, before checkout. Nothing private is stored
+in GitHub; the runner's key and inventory are mounted read-only on node1
+([ADR-0005](docs/decisions/0005-self-hosted-runner-on-a-public-repo.md),
 [sequence diagram](docs/cicd.md)).
 
 ## Quick start
@@ -167,9 +170,10 @@ make check-host HOST=node2                          # dry run on one machine (as
 make apply-host HOST=node2                          # apply to that machine
 ```
 
-Each machine has its own sudo password, so `check-host` / `apply-host` work
-one machine at a time; `make check LIMIT=<host>` needs no prompt on a host
-with password-free sudo (the gateway). `make help` lists every target.
+The admin account has password-free sudo on every machine (CI deploys need
+it), so `make check LIMIT=<host>` and `make apply LIMIT=<host>` run without a
+prompt; `check-host` / `apply-host` ask for a sudo password, for a machine set
+up without it. `make help` lists every target.
 
 ## Repository layout
 
@@ -180,6 +184,7 @@ with password-free sudo (the gateway). `make help` lists every target.
 │   ├── auto_updates/           # unattended security upgrades
 │   ├── ssh_hardening/          # sshd drop-in, validated with `sshd -t` before install
 │   ├── authorized_keys/        # keys with from= source pinning
+│   ├── sudo_nopasswd/          # unattended sudo for the automation account, visudo-checked
 │   ├── firewall/               # ufw defaults, tailnet, lab trust, host rules
 │   ├── router/                 # forwarding, NAT, lab→home block, dnsmasq
 │   ├── nfs_server/             # per-share exports, refuses wildcard clients
@@ -187,6 +192,7 @@ with password-free sudo (the gateway). `make help` lists every target.
 ├── inventory/hosts.example.yml # shape of the private inventory (RFC 5737 addresses)
 ├── group_vars/all.yml          # shared defaults, nothing identifying
 ├── scripts/                    # check-private-data.sh, check-workflows.sh
+├── runner/                     # self-hosted runner: compose file, job-started hook, start script
 ├── docs/
 │   ├── architecture.md · network.md · cicd.md · verification.md
 │   ├── security/               # threat model, access model, hardening log

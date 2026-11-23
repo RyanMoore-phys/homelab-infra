@@ -1,9 +1,12 @@
 # Deploys to the lab from the self-hosted runner.
-#  - Only workflow_dispatch: nobody without write access can start it, and a
-#    pull request can never reach the runner (scripts/check-workflows.sh
-#    enforces this in CI).
-#  - Only from main, only by the repository owner, and only after approval in
-#    the protected "homelab" environment, which also holds the secrets.
+#  - Only workflow_dispatch: nobody without write access can start it
+#    (scripts/check-workflows.sh enforces this in CI).
+#  - Only from main, only by the repository owner, after approval in the
+#    "homelab" environment. The runner enforces the same rule itself with a
+#    job-started hook (runner/job-started.sh), which also stops workflows a
+#    pull request might add.
+#  - Nothing private comes from GitHub: the SSH key, the inventory and
+#    known_hosts are mounted read-only into the runner container on node1.
 #  - Actions logs of a public repo are public: every address in the inventory
 #    is masked, and only the PLAY RECAP is printed. The full log stays on the
 #    runner host.
@@ -46,19 +49,16 @@ jobs:
         run: |
           [[ "$LIMIT" =~ ^[A-Za-z0-9_,:!*.-]+$ ]] || { echo "invalid --limit value"; exit 1; }
 
-      - name: Write private files to the runner's temp dir (never printed)
-        env:
-          INVENTORY_B64: ${{ secrets.HOMELAB_INVENTORY }}
-          SSH_KEY: ${{ secrets.HOMELAB_SSH_KEY }}
-          KNOWN_HOSTS: ${{ secrets.HOMELAB_KNOWN_HOSTS }}
+      - name: Check the runner's private files (mounted on node1, never printed)
         run: |
           set -euo pipefail
-          umask 077
-          d="$RUNNER_TEMP/homelab"
-          mkdir -p "$d"
-          printf '%s' "$INVENTORY_B64" | base64 -d > "$d/hosts.yml"
-          printf '%s\n' "$SSH_KEY" > "$d/id_deploy"
-          printf '%s\n' "$KNOWN_HOSTS" > "$d/known_hosts"
+          # Key, inventory and known_hosts are mounted read-only into the runner
+          # container (runner/docker-compose.yml). The key is accepted only from
+          # node1's lab address.
+          d="$HOME/homelab"
+          for f in "$HOME/.ssh/homelab_deploy" "$d/hosts.yml" "$d/known_hosts"; do
+            test -r "$f" || { echo "missing on the runner: ${f/#$HOME/~}"; exit 1; }
+          done
           # Mask every IP address and tailnet name from the inventory in this public log.
           grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}|[A-Za-z0-9.-]+\.ts\.net' "$d/hosts.yml" | sort -u \
             | while read -r v; do echo "::add-mask::$v"; done || true
@@ -86,20 +86,17 @@ jobs:
         run: |
           set -uo pipefail
           args=(-i "$HOMELAB_DIR/hosts.yml" playbooks/site.yml --limit "$LIMIT"
-                --private-key "$HOMELAB_DIR/id_deploy"
+                --private-key "$HOME/.ssh/homelab_deploy"
                 # --ssh-EXTRA-args, written with "=": the inventory sets ssh COMMON args
                 # (HostKeyAlias) and inventory variables override CLI options, so common
                 # args from here would be dropped and host-key checking silently lost
                 # (the runner image's own ssh config turns it off). Tested both ways.
                 "--ssh-extra-args=-o UserKnownHostsFile=$HOMELAB_DIR/known_hosts -o StrictHostKeyChecking=yes")
           if [ "$MODE" = check ]; then args+=(--check); fi
-          logdir="$HOME/homelab-deploy-logs"; mkdir -p "$logdir"; chmod 700 "$logdir"
+          # Kept in the runner's work volume, so the logs survive a rebuilt container.
+          logdir="$HOME/_work/_homelab-deploy-logs"; mkdir -p "$logdir"; chmod 700 "$logdir"
           log="$logdir/$(date -u +%Y%m%dT%H%M%SZ)-$MODE.log"
           if .venv/bin/ansible-playbook "${args[@]}" > "$log" 2>&1; then rc=0; else rc=$?; fi
           echo "mode=$MODE exit=$rc (full log is on the runner host only)"
           sed -n '/PLAY RECAP/,$p' "$log"
           exit "$rc"
-
-      - name: Remove private files
-        if: always()
-        run: rm -rf "$RUNNER_TEMP/homelab"

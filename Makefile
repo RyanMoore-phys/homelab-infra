@@ -24,7 +24,7 @@ setup: $(BIN)/ansible-playbook ## Create .venv with pinned Ansible, linters and 
 guards: ## Private-data guard, workflow guard, shellcheck
 	scripts/check-private-data.sh
 	scripts/check-workflows.sh
-	shellcheck scripts/*.sh
+	shellcheck scripts/*.sh runner/*.sh
 
 lint: setup ## yamllint + ansible-lint (production profile)
 	$(BIN)/yamllint .

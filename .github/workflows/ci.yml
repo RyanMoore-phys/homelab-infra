@@ -32,7 +32,7 @@ jobs:
       - name: Secret scan, full git history (gitleaks)
         run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.21.2 detect --source /repo --redact --no-banner --verbose
       - name: Shellcheck
-        run: shellcheck scripts/*.sh
+        run: shellcheck scripts/*.sh runner/*.sh
 
   lint:
     name: ansible lint and syntax

@@ -9,7 +9,7 @@ refused. Last full run: 2026-11-22.
 | Test | Command | Expected | Result |
 |---|---|---|---|
 | Gateway matches the roles (incl. Slurm, GPU) | `make check LIMIT=gateway` | `changed=0` | 27 ok, `changed=0` |
-| Nodes match the roles | `make check-host HOST=<node>` (asks for that node's sudo password) | `changed=0` | to run by the owner |
+| Nodes match the roles | the deploy job's steps inside the runner container, check mode, all hosts | `changed=0` | each node `changed=1`: the Tailscale port rule (41641/udp) the code now sets on every machine; added by the first `apply` |
 | Ansible reaches nodes through the gateway | `ansible lab_nodes -m ping -e ansible_become=false` | `pong`, client address = gateway | pass, 3/3 |
 
 ## Access
@@ -21,6 +21,10 @@ refused. Last full run: 2026-11-22.
 | Fallback path | SSH to a node's own tailnet address reaches it directly, without the gateway | | pass, 3/3 |
 | `from=` on automation keys | gateway → nodes; runner → gateway root | gateway key from an unlisted source (`ssh -b <ipv6 link-local>`) → refused | pass |
 | X11 off | `ssh -X <host> 'echo $DISPLAY'` prints nothing | | pass |
+| CI runner key | from the runner container on node1: logs in on all four machines (node1 itself from its Docker network) | the same key from the gateway → `Permission denied (publickey)` | pass, 4/4 · refused: pass |
+| Unattended sudo for CI | `sudo -n true` and `sudo.ws -n true` as the admin account on every machine | | pass, 4/4 |
+| Runner job hook | the owner's manual `deploy.yml` on main → allowed | pull request event, another branch, another workflow file, `deploy.yml` from a pull request's merge ref, another actor or re-runner, another repository, no variables → refused | pass, 11/11 locally; allowed and refused cases also inside the container; first live run pending |
+| CI deploy rehearsal | the job's steps inside the runner container: setup-python's 3.12 build, pinned Ansible, mounted key, inventory and known_hosts, strict host keys, check mode, all hosts | | exit 0; 4/4 reached |
 | Owner key passphrase | | `ssh-keygen -y -P "" -f ~/.ssh/id_ed25519` fails (a passphrase is required) | pass |
 
 ## Network

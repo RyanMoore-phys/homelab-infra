@@ -102,7 +102,7 @@ flowchart TB
 | node1 | `lab_nodes`, `slurm_nodes` | Grafana, Prometheus, wiki (Docker Compose), Slurm job board, Actions runners (one container per repository), slurmd, NFS client | baseline + `slurm` |
 | node2 | `lab_nodes`, `slurm_nodes` | slurmd, node_exporter, NFS client | baseline + `slurm` |
 
-*Baseline* = `auto_updates`, `ssh_hardening`, `authorized_keys`, `firewall`.
+*Baseline* = `auto_updates`, `ssh_hardening`, `authorized_keys`, `sudo_nopasswd` (nodes), `firewall`.
 
 ## 3. Compute and storage
 

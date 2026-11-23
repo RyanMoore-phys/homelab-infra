@@ -6,6 +6,7 @@
     - auto_updates
     - ssh_hardening
     - authorized_keys
+    - sudo_nopasswd
     - firewall
 
 - name: Gateway between the lab and the home network

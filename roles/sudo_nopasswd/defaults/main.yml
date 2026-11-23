@@ -1,0 +1,4 @@
+# Accounts that may sudo without a password, so Ansible can run unattended
+# from the CI runner (owner decision 2026-11-22, ADR-0005). Each gets its own
+# drop-in, checked with visudo before it is put in place. Empty = no change.
+sudo_nopasswd_users: []
