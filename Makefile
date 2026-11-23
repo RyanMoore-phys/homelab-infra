@@ -7,7 +7,7 @@ INV   ?= inventory/hosts.yml
 LIMIT ?= all
 
 .DEFAULT_GOAL := help
-.PHONY: help setup guards lint syntax test check check-nodes apply check-host apply-host clean
+.PHONY: help setup guards lint syntax test check patch-status check-nodes apply check-host apply-host clean
 
 help: ## List targets
 	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -32,11 +32,15 @@ lint: setup ## yamllint + ansible-lint (production profile)
 
 syntax: setup ## Playbook syntax against the example inventory
 	$(BIN)/ansible-playbook -i inventory/hosts.example.yml playbooks/site.yml --syntax-check
+	$(BIN)/ansible-playbook -i inventory/hosts.example.yml playbooks/patch-status.yml --syntax-check
 
 test: guards lint syntax ## Everything CI runs (no lab access needed)
 
 check: setup ## Dry run against the real lab: shows what WOULD change (LIMIT=host|group)
 	$(BIN)/ansible-playbook -i $(INV) playbooks/site.yml --check --diff --limit '$(LIMIT)'
+
+patch-status: setup ## Read-only: reboots, pending and held updates on every machine (LIMIT=host|group)
+	$(BIN)/ansible-playbook -i $(INV) playbooks/patch-status.yml --limit '$(LIMIT)'
 
 check-nodes: setup ## Dry run on the lab nodes, asking for their sudo password
 	$(BIN)/ansible-playbook -i $(INV) playbooks/site.yml --check --diff --limit lab_nodes --ask-become-pass

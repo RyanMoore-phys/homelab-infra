@@ -18,7 +18,7 @@ SSH key, the automation keys, and the GitHub and Tailscale accounts.
 | Unauthenticated dashboards (Prometheus has no login) | Bound to localhost; Grafana (login) published by the gateway over HTTPS |
 | A pull request running code on the self-hosted runner | The runner's job-started hook refuses every job except the owner's manual `deploy.yml` on main, including workflows a pull request adds; fork pull requests wait for approval; CI keeps this repository's self-hosted workflows dispatch-only |
 | Secrets or addresses leaking through this public repo | Gitignored inventory, nothing private in GitHub (the runner's key and inventory are mounted on node1), gitleaks over full history, a private-data guard, masked deploy logs |
-| Unpatched packages | Unattended security upgrades everywhere |
+| Unpatched packages or kernels | Unattended upgrades everywhere, Tailscale and Docker CE included; nodes reboot through Slurm after their running jobs when an update needs it; the gateway's reboots are the owner's, shown by `make patch-status` ([patching](../patching.md)) |
 | A lab node reaching the boundary host's Slurm daemon | The gateway admits slurmd traffic from the controller only |
 | A runaway Slurm job starving the router | `MemSpecLimit` keeps 2 GB for the gateway's own work; cgroups kill a job that outgrows its request |
 

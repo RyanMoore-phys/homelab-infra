@@ -75,15 +75,23 @@ node1.
 
 ## In GitHub (Settings)
 
-1. **Actions -> General -> Fork pull request workflows**: "Require approval
+1. **Actions -> General -> Actions permissions**: "Allow *your account*, and
+   select non-*your account*, actions and reusable workflows", with "Allow
+   actions created by GitHub" ticked, nothing else allowed, and "Require
+   actions to be pinned to a full-length commit SHA" on. The workflows use only
+   `actions/checkout` and `actions/setup-python`, each pinned by SHA. "Your
+   account's actions only" refuses both and fails every run before its first
+   step. Listing the two exact SHAs instead also works, but every Dependabot
+   bump then fails until the list is edited.
+2. **Actions -> General -> Fork pull request workflows**: "Require approval
    for all external contributors" (a second layer behind the hook).
-2. **Actions -> General -> Workflow permissions**: "Read repository contents".
-3. **Environments -> `homelab`** (created by the first deploy run, or by hand):
+3. **Actions -> General -> Workflow permissions**: "Read repository contents".
+4. **Environments -> `homelab`** (created by the first deploy run, or by hand):
    required reviewer yourself, "Prevent self-review" off, deployment branches
    `main` only. It holds no secrets.
-4. **Code security**: secret scanning, push protection and private
+5. **Code security**: secret scanning, push protection and private
    vulnerability reporting on.
-5. **Branches -> protect `main`**: require the `ci` checks to pass.
+6. **Branches -> protect `main`**: require the `ci` checks to pass.
 
 ## Running it
 

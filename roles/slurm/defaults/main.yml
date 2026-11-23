@@ -7,6 +7,12 @@ slurm_ctld_port: 6817
 slurm_d_port: 6818
 slurm_srun_ports: 60001-60100
 slurm_return_to_service: 1
+# `scontrol reboot` (the auto_updates role's drained reboots) runs this program
+# on the node once its jobs are done, and marks the node DOWN if it is not back
+# within ResumeTimeout seconds. Slurm's default, 60 s, is shorter than a real
+# reboot.
+slurm_reboot_program: /usr/sbin/reboot
+slurm_resume_timeout: 600
 slurm_ctld_timeout: 120
 slurm_d_timeout: 300
 slurm_partition:

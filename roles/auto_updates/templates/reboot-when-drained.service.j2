@@ -1,0 +1,9 @@
+# Managed by Ansible (auto_updates role).
+[Unit]
+Description=Reboot through Slurm, after running jobs, when an OS update needs it
+Wants=network-online.target
+After=network-online.target slurmd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/reboot-when-drained

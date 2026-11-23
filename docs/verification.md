@@ -11,6 +11,17 @@ refused. Last full run: 2026-11-22.
 | Gateway matches the roles (incl. Slurm, GPU) | `make check LIMIT=gateway` | `changed=0` | 27 ok, `changed=0` |
 | Nodes match the roles | the deploy job's steps inside the runner container, check mode, all hosts | `changed=0` | each node `changed=1`: the Tailscale port rule (41641/udp) the code now sets on every machine; added by the first `apply` |
 | Ansible reaches nodes through the gateway | `ansible lab_nodes -m ping -e ansible_become=false` | `pong`, client address = gateway | pass, 3/3 |
+| Patching change (ADR-0008), before apply | `make check`, all hosts | gateway: origins file, `slurm.conf`; nodes: also the reboot script and timer | as expected on 4/4, 0 failed (each node also shows the pending 41641/udp rule) |
+
+## Patching
+
+| Control | Test | Result |
+|---|---|---|
+| Outside repositories update unattended | the rendered origins file parses (`apt-config -c`), and unattended-upgrades' own matcher, run on node2, allows Tailscale's next version | pass |
+| Drained reboot asks only when it should | the reboot script against node2's real `scontrol` output, with a stand-in that prints instead of acting: idle and busy → reboot requested after jobs; drained, down, already requested → left alone; unknown node → refused | pass, 6/6 |
+| Runners survive a reboot | on a copy of the homelab runner, the shutdown de-register fails without a valid token and leaves `.runner` and `.credentials` in place | pass |
+| Status report | `make patch-status` | to run after apply |
+| First drained reboots | the three nodes (kernel three updates behind) reboot through Slurm and return to service | pending: after apply, on the first weekly run or by hand |
 
 ## Access
 

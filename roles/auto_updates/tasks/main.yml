@@ -16,3 +16,73 @@
     name: unattended-upgrades
     state: started
     enabled: true
+
+- name: Let unattended-upgrades install updates from the outside repositories too
+  ansible.builtin.template:
+    src: 51homelab-origins.j2
+    dest: /etc/apt/apt.conf.d/51homelab-origins
+    owner: root
+    group: root
+    mode: "0644"
+    validate: apt-config -c %s dump
+
+- name: Reboot through Slurm, after running jobs, when an update needs it
+  when: auto_updates_reboot == 'slurm_drain'
+  block:
+    - name: Install the Slurm client (scontrol)
+      ansible.builtin.apt:
+        name: slurm-client
+        state: present
+
+    - name: Write the drained-reboot script
+      ansible.builtin.template:
+        src: reboot-when-drained.sh.j2
+        dest: /usr/local/sbin/reboot-when-drained
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Write its systemd service and weekly timer
+      ansible.builtin.template:
+        src: "reboot-when-drained.{{ item }}.j2"
+        dest: "/etc/systemd/system/reboot-when-drained.{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: [service, timer]
+      register: auto_updates_timer_files
+
+    # In check mode the unit files are not written, so there is nothing to
+    # enable yet; the real run reloads systemd and enables the timer.
+    - name: Enable the weekly timer
+      ansible.builtin.systemd_service:
+        name: reboot-when-drained.timer
+        state: started
+        enabled: true
+        daemon_reload: true
+      when: not ansible_check_mode or auto_updates_timer_files is not changed
+
+- name: Remove the drained-reboot timer where it is not wanted
+  when: auto_updates_reboot != 'slurm_drain'
+  block:
+    - name: Look for the timer
+      ansible.builtin.stat:
+        path: /etc/systemd/system/reboot-when-drained.timer
+      register: auto_updates_old_timer
+
+    - name: Stop and disable it
+      ansible.builtin.systemd_service:
+        name: reboot-when-drained.timer
+        state: stopped
+        enabled: false
+      when: auto_updates_old_timer.stat.exists
+
+    - name: Remove its files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/systemd/system/reboot-when-drained.timer
+        - /etc/systemd/system/reboot-when-drained.service
+        - /usr/local/sbin/reboot-when-drained
+      notify: Reload systemd

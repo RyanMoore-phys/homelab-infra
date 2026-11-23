@@ -60,6 +60,17 @@ Decision: [ADR-0007](../decisions/0007-gateway-joins-slurm.md). Security-relevan
 | Private CI files in GitHub | none: key, inventory and known_hosts mounted read-only from node1; the environment secrets were never created | deploy job checks they are readable |
 | The runner could not log in to node1, its own host | the container reaches node1 from its Docker bridge address, so node1 also accepts the CI key from its own Docker networks (`ci_runner_from`, node1 only) | check mode from the container: 4/4 reached |
 
+## 2026-11-23: patching gaps
+
+Decision: [ADR-0008](../decisions/0008-unattended-patching-and-drained-reboots.md); how it works: [patching](../patching.md).
+
+| Finding | Risk | Fix |
+|---|---|---|
+| The three nodes up 54 days, three kernel updates behind (two with a libc update too) | Patched packages on disk, unpatched kernel in memory | Weekly drained reboot through Slurm (`scontrol reboot ASAP nextstate=RESUME`), after running jobs; `RebootProgram`, `ResumeTimeout=600` |
+| Tailscale never updated itself on any machine; skybot's Docker CE neither | The program carrying every remote session stays on old versions | Their repositories added to unattended-upgrades (`Origins-Pattern`) |
+| Monitoring containers pinned to versions nothing watched | Known vulnerabilities in Grafana or Prometheus go unnoticed | Dependabot on the monitoring stack's images, patch and minor versions |
+| No single view of what each machine still needs | Pending reboots and held packages found by accident | `make patch-status`, read-only |
+
 ## Traps worth knowing
 
 1. **Docker publishes around ufw.** Bind every published port to an address.

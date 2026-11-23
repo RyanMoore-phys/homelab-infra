@@ -84,7 +84,7 @@ Deeper: [architecture](docs/architecture.md) · [network, packet path and port m
 | Segmentation | Lab reaches the internet but cannot open connections to the home network | node → home router refused; internet and DNS still work |
 | Services | Prometheus on `127.0.0.1`; Grafana and the wiki on node1's lab address, published on the tailnet by the gateway over HTTPS | Prometheus refused from the network; Grafana healthy through the gateway |
 | Storage | NFS exports list each client (three, including the gateway), `root_squash` | exports reviewed; role refuses wildcard exports |
-| Patching | Unattended security upgrades everywhere | role-enforced |
+| Patching | Unattended upgrades everywhere, including Tailscale and Docker CE; nodes reboot through Slurm after their running jobs when an update needs it; Dependabot for actions, tools and monitoring images ([patching](docs/patching.md), [ADR-0008](docs/decisions/0008-unattended-patching-and-drained-reboots.md)) | `make patch-status`; reboot script tested on every Slurm state |
 | Supply chain | Actions pinned to commit SHAs; Python, Ansible, linters, collections pinned; Dependabot | CI |
 | Public repo | Private-data guard, gitleaks on full history, workflow guard, masked deploy logs | guards tested with planted leaks |
 
@@ -168,6 +168,7 @@ cp inventory/hosts.example.yml inventory/hosts.yml  # your hosts (gitignored)
 make test                                           # everything CI runs; no lab access needed
 make check-host HOST=node2                          # dry run on one machine (asks for its sudo password)
 make apply-host HOST=node2                          # apply to that machine
+make patch-status                                   # read-only: reboots and updates waiting
 ```
 
 The admin account has password-free sudo on every machine (CI deploys need
@@ -179,9 +180,11 @@ up without it. `make help` lists every target.
 
 ```text
 .
-├── playbooks/site.yml          # baseline for all hosts, then router / NFS / Slurm plays
+├── playbooks/
+│   ├── site.yml                # baseline for all hosts, then router / NFS / Slurm plays
+│   └── patch-status.yml        # read-only report: reboots, pending and held updates
 ├── roles/
-│   ├── auto_updates/           # unattended security upgrades
+│   ├── auto_updates/           # unattended upgrades (incl. Tailscale, Docker CE), drained reboots
 │   ├── ssh_hardening/          # sshd drop-in, validated with `sshd -t` before install
 │   ├── authorized_keys/        # keys with from= source pinning
 │   ├── sudo_nopasswd/          # unattended sudo for the automation account, visudo-checked
@@ -194,12 +197,12 @@ up without it. `make help` lists every target.
 ├── scripts/                    # check-private-data.sh, check-workflows.sh
 ├── runner/                     # self-hosted runner: compose file, job-started hook, start script
 ├── docs/
-│   ├── architecture.md · network.md · cicd.md · verification.md
+│   ├── architecture.md · network.md · cicd.md · patching.md · verification.md
 │   ├── security/               # threat model, access model, hardening log
-│   ├── decisions/              # ADR-0001 … 0007
+│   ├── decisions/              # ADR-0001 … 0008
 │   └── runbooks/               # runner, router failover, Slurm, gateway in Slurm, job board, rollback
 ├── .github/workflows/          # ci.yml (hosted) · deploy.yml (self-hosted, gated)
-└── Makefile                    # setup · test · check(-host) · apply(-host)
+└── Makefile                    # setup · test · check(-host) · apply(-host) · patch-status
 ```
 
 ## Verification

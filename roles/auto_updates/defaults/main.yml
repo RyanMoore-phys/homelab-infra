@@ -1,2 +1,27 @@
 auto_updates_update_lists: "1"
 auto_updates_unattended_upgrade: "1"
+
+# Outside apt repositories whose updates install themselves as well, written as
+# unattended-upgrades Origins-Pattern entries (Ubuntu's own security updates
+# are already allowed by the stock configuration). A pattern for a repository
+# a machine does not use matches nothing there. Held packages (apt-mark hold)
+# are never upgraded. Left out on purpose: the gateway's deadsnakes Python (the
+# training interpreter, upgraded between runs), NVIDIA and Kubernetes (held).
+auto_updates_extra_origins:
+  - "origin=Tailscale,label=Tailscale"
+  - "origin=Docker,label=Docker CE"
+
+# What happens when an installed update needs a reboot (/var/run/reboot-required):
+#   slurm_drain  once a week, Slurm drains the node, waits for its running jobs
+#                to finish, reboots it and returns it to service
+#                (scontrol reboot ASAP nextstate=RESUME). A node someone drained
+#                or took down on purpose is left alone.
+#   never        nothing happens; `make patch-status` lists the machine and the
+#                owner reboots it.
+# The gateway never reboots itself: it routes the lab and runs real-time
+# training outside Slurm, which a drain cannot protect.
+auto_updates_reboot: "{{ 'slurm_drain' if ('slurm_nodes' in group_names and 'router' not in group_names) else 'never' }}"
+# Weekly check (systemd OnCalendar). Each machine adds its own fixed delay of
+# up to two hours, so the nodes do not all drain at once.
+auto_updates_reboot_when: "Sun *-*-* 04:30"
+auto_updates_reboot_spread: 2h

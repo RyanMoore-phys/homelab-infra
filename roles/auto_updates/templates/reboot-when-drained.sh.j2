@@ -1,0 +1,35 @@
+#!/bin/sh
+# Managed by Ansible (auto_updates role); run weekly by reboot-when-drained.timer.
+#
+# When an installed update needs a reboot, ask Slurm to drain this node, wait
+# for its running jobs to finish, reboot it (slurm.conf RebootProgram) and
+# return it to service. Nothing is killed: new jobs stop landing here and the
+# reboot waits for the last running one.
+#
+# A node someone drained or took down on purpose is left alone, because
+# nextstate=RESUME would undo that decision after the reboot. Resume it, or
+# reboot it by hand, and the next run picks it up.
+set -eu
+node="{{ inventory_hostname }}"
+
+if [ ! -f /var/run/reboot-required ]; then
+  echo "no reboot needed"
+  exit 0
+fi
+
+state=$(scontrol show node "$node" -o | sed -n 's/.* State=\([^ ]*\).*/\1/p')
+case "$state" in
+  "")
+    echo "Slurm does not know node $node; not rebooting" >&2
+    exit 1 ;;
+  *REBOOT*)
+    echo "reboot already requested ($state)"
+    exit 0 ;;
+  *DRAIN*|*DOWN*|*FAIL*|*MAINT*)
+    echo "left alone: $node is $state; a person decides when it comes back"
+    exit 0 ;;
+esac
+
+pkgs=$(tr '\n' ' ' < /var/run/reboot-required.pkgs 2>/dev/null | cut -c1-120 || true)
+scontrol reboot ASAP nextstate=RESUME reason="OS update: ${pkgs:-reboot required}" "$node"
+echo "reboot requested for $node after its running jobs: ${pkgs:-reboot required}"

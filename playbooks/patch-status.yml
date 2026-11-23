@@ -1,0 +1,31 @@
+# Read-only report of what each machine still needs: a reboot, pending and held
+# updates, the last unattended run and the drained-reboot timer. Changes
+# nothing; safe at any time:
+#   make patch-status            (LIMIT=host|group to narrow it)
+- name: Patch status of every machine
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Read reboot, pending, held and last unattended run
+      ansible.builtin.shell: |
+        set -o pipefail
+        if [ -f /var/run/reboot-required ]; then
+          echo "reboot:        NEEDED for $(tr '\n' ' ' < /var/run/reboot-required.pkgs 2>/dev/null)"
+        else
+          echo "reboot:        not needed"
+        fi
+        echo "kernel:        $(uname -r), up since $(uptime -s)"
+        echo "pending:       $(apt-get -s -o Debug::NoLocking=1 dist-upgrade 2>/dev/null | grep -c '^Inst' || true) package(s)"
+        echo "held:          $(apt-mark showhold | tr '\n' ' ')"
+        echo "last u-u run:  $(tail -1 /var/log/unattended-upgrades/unattended-upgrades.log 2>/dev/null | cut -c1-16)"
+        echo "reboot timer:  $(systemctl is-enabled reboot-when-drained.timer 2>/dev/null || echo off)"
+        echo "tailscale:     $(tailscale version 2>/dev/null | head -1)"
+      args:
+        executable: /bin/bash
+      register: patch_status
+      changed_when: false
+      check_mode: false
+
+    - name: Show it
+      ansible.builtin.debug:
+        msg: "{{ patch_status.stdout_lines }}"

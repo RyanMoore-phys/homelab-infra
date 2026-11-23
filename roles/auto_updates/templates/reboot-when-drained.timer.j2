@@ -1,0 +1,14 @@
+# Managed by Ansible (auto_updates role).
+[Unit]
+Description=Weekly check for an OS update that needs a reboot
+
+[Timer]
+OnCalendar={{ auto_updates_reboot_when }}
+# A fixed delay per machine (FixedRandomDelay), so the nodes drain at
+# different times and the cluster never loses every node at once.
+RandomizedDelaySec={{ auto_updates_reboot_spread }}
+FixedRandomDelay=true
+Persistent=true
+
+[Install]
+WantedBy=timers.target

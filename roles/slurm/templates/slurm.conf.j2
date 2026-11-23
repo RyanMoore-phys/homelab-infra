@@ -24,6 +24,8 @@ JobAcctGatherFrequency=30
 AccountingStorageType=accounting_storage/none
 
 ReturnToService={{ slurm_return_to_service }}
+RebootProgram={{ slurm_reboot_program }}
+ResumeTimeout={{ slurm_resume_timeout }}
 SlurmctldTimeout={{ slurm_ctld_timeout }}
 SlurmdTimeout={{ slurm_d_timeout }}
 {% if slurm_gres_types | default('') %}

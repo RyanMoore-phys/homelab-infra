@@ -1,0 +1,7 @@
+// Managed by Ansible (auto_updates role). Outside repositories whose updates
+// unattended-upgrades installs, on top of Ubuntu's Allowed-Origins.
+Unattended-Upgrade::Origins-Pattern {
+{% for origin in auto_updates_extra_origins %}
+        "{{ origin }}";
+{% endfor %}
+};
