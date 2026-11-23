@@ -6,5 +6,14 @@
 #     - user: admin
 #       key: "ssh-ed25519 <public key> gateway"
 #       from: [192.0.2.1]           # a stolen copy is useless anywhere else
-# Keys that are not listed are left alone; remove an old key by hand.
 authorized_keys: []
+
+# Each listed account gets exactly the keys listed for it: a key that is not in
+# the inventory is REMOVED. Before 2026-11-23 the role only added keys, and an
+# unused root key without from= survived on the gateway that way.
+authorized_keys_exclusive: true
+
+# The owner's own key. With exclusive mode on, the role refuses to write
+# anything unless the admin account (ansible_user) keeps this key, so a typo in
+# the inventory cannot lock the owner out.
+authorized_keys_owner_key: ""

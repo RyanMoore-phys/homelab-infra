@@ -17,7 +17,7 @@ A node's own tailnet address is a fallback for when the gateway is down
 
 | Flow | Policy | Mechanism on the gateway |
 |---|---|---|
-| Lab → Internet | allow | ufw route allow `lan_if → wan_if`; `MASQUERADE` out `wan_if` (`/etc/ufw/before.rules`) |
+| Lab → Internet | allow | ufw route allow `lan_if → wan_if`; the lab range is masqueraded out `wan_if` by its own nftables table, `homelab_nat` (kept out of ufw, whose reloads used to duplicate the rule) |
 | Lab → home network | **deny** | ufw route deny to `home_cidr`, first in the routed rule list |
 | Lab → home, UDP from port 41641 | allow (narrow exception) | nodes keep direct WireGuard paths to tailnet devices on the home network; ufw route allow above the deny |
 | Tailnet → lab | allow | Tailscale `ts-forward` accepts, `ts-postrouting` masquerades: nodes see the gateway's lab address |
@@ -58,7 +58,7 @@ flowchart TD
     est2 -->|"no"| home{"lan_if → wan_if,<br/>destination in<br/>home_cidr?"}
     home -->|"yes"| drop2["DROP · segmentation"]
     home -->|"no"| out{"lan_if → wan_if?"}
-    out -->|"yes"| masq["ACCEPT · MASQUERADE<br/>out wan_if"]
+    out -->|"yes"| masq["ACCEPT · masquerade out wan_if<br/>nftables table homelab_nat"]
     out -->|"no"| drop3["DROP · default routed"]
 
     classDef accept fill:#e8f5e9,stroke:#2e7d32,color:#1a1a1a
@@ -87,7 +87,8 @@ flowchart TD
 
 ## Port matrix
 
-Listening services reachable from somewhere other than localhost. For the
+Listening services reachable from somewhere other than localhost, read from
+each machine with `ss -tulnp` and `ufw status` on 2026-11-23. For the
 nodes, "Tailnet" is the normal path through the gateway's subnet route; the
 same ports also answer on a node's own tailnet address (the fallback). Reachability
 of the gateway's Slurm ports was measured from every node (TCP connect).
@@ -101,10 +102,14 @@ of the gateway's Slurm ports was measured from every node (TCP connect).
 | gateway | 443, 8443/tcp | `tailscale serve`: wiki, Grafana (HTTPS) | no | yes | no |
 | gateway | 6818/tcp | slurmd | **Slurm controller only** | no | no |
 | gateway | 60001-60100/tcp | srun callbacks | not open (multi-node steps start on node0) | no | no |
+| gateway | 8765/tcp | the training project's control service (token required) | no | yes | no |
+| gateway | 111 | rpcbind (from the NFS client packages) | no | yes | no |
 | node0-2 | 22/tcp | OpenSSH (keys only) | yes | via gateway | no |
 | node0-2 | 9100/tcp | node_exporter | yes | via gateway | no |
 | node0-2 | 6818/tcp, 60001-60100/tcp | slurmd, srun callbacks | yes | via gateway | no |
+| node0-2 | 111 | rpcbind | yes (lab trust) | via gateway | no |
 | node0 | 2049/tcp | NFS v4.2 (named clients only) | yes | via gateway | no |
+| node0 | 25565/tcp | game server (stopped: allowed, but nothing listening) | yes (lab trust) | yes | no |
 | node0 | 6817/tcp | slurmctld | yes | via gateway | no |
 | node1 | 3000, 8080/tcp | Grafana, wiki (lab address) | yes | via gateway | no |
 | node1 | 9090/tcp | Prometheus | **localhost only** | no | no |

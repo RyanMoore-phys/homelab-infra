@@ -1,7 +1,7 @@
 # homelab-infra
 
 [![ci](https://github.com/RyanMoore-phys/homelab-infra/actions/workflows/ci.yml/badge.svg)](https://github.com/RyanMoore-phys/homelab-infra/actions/workflows/ci.yml)
-![Ansible](https://img.shields.io/badge/Ansible-2.19-1A1918?logo=ansible)
+![Ansible](https://img.shields.io/badge/Ansible-2.21-1A1918?logo=ansible)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-26.04_LTS-E95420?logo=ubuntu&logoColor=white)
 ![Tailscale](https://img.shields.io/badge/Tailscale-WireGuard-242424?logo=tailscale)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
@@ -9,9 +9,11 @@
 Infrastructure as code for a four-machine Ubuntu homelab: a Linux gateway
 that routes and segments a private lab network, a four-node Slurm cluster
 (the three lab nodes plus the gateway's CPUs and GPU)
-with shared NFS storage, and a monitoring stack, with **zero ports exposed to
-the internet**. Every host setting is an idempotent Ansible role, checked by
-CI on every push and deployed through a gated, owner-approved pipeline.
+with shared NFS storage, and a monitoring stack, with **nothing forwarded in
+from the internet**. The host configuration (SSH, keys, sudo, firewall,
+routing, NFS exports, Slurm, patching) is idempotent Ansible roles, checked by
+CI on every push and deployed through a gated, owner-approved pipeline. What
+is still set up by hand is listed under [Maintenance](#maintenance).
 
 This repository is public, so it is built to hold **no addresses, keys,
 logins or tailnet names**. CI fails the build if one appears, and the guards
@@ -32,7 +34,7 @@ flowchart TB
     subgraph LAB[" "]
         sw{{"<b>Lab network · trusted</b><br/>Ethernet switch"}}
         n0["<b>node0</b><br/>NFS server · Slurm controller"]
-        n1["<b>node1</b><br/>monitoring · CI runner · Slurm"]
+        n1["<b>node1</b><br/>monitoring · wiki · 2 CI runners · Slurm"]
         n2["<b>node2</b><br/>Slurm compute"]
     end
 
@@ -64,9 +66,9 @@ flowchart TB
 
 | Machine | Role |
 |---|---|
-| **gateway** | A dedicated machine between the home network and the lab: routing, NAT, dnsmasq, default-deny firewall, lab→home block, the Tailscale subnet router every remote session goes through, HTTPS for lab web UIs, and a Slurm compute node with 12 CPUs and the lab's only GPU ([ADR-0007](docs/decisions/0007-gateway-joins-slurm.md)) |
-| **node0** | NFS v4.2 server for shared simulation data, Slurm controller, compute |
-| **node1** | Grafana + Prometheus (Docker Compose), Slurm job board, self-hosted Actions runner, compute |
+| **gateway** | A dedicated machine between the home network and the lab: routing, NAT, dnsmasq, default-deny firewall, lab→home block, the Tailscale subnet router every remote session goes through, HTTPS for lab web UIs, and a Slurm compute node with 12 CPUs and the lab's only GPU ([ADR-0007](docs/decisions/0007-gateway-joins-slurm.md)). It is also the training project's host, which runs real-time training outside Slurm |
+| **node0** | NFS v4.2 server for shared simulation data (`/srv/openmc`), Slurm controller, compute. A game server unit is installed but stopped |
+| **node1** | Grafana + Prometheus and a wiki behind Caddy (Docker Compose), Slurm job board, two self-hosted Actions runners (one per repository), compute |
 | **node2** | Compute |
 
 Every machine runs Tailscale, but remote traffic is directed **through the gateway first**: SSH, Ansible, monitoring and the web UIs all reach the nodes by their lab address over its subnet route. Each node's own tailnet address is kept only as a fallback for when the gateway is down.
@@ -78,10 +80,10 @@ Deeper: [architecture](docs/architecture.md) · [network, packet path and port m
 
 | Layer | Control | Verified by |
 |---|---|---|
-| Ingress | No port forwards, UPnP off. Tailscale is the only way in; remote traffic goes through the gateway first, with each node's own tailnet address as a fallback ([ADR-0002](docs/decisions/0002-tailscale-only-ingress.md)) | every node sees the owner's sessions arrive from the gateway's lab address; router settings checked by hand |
-| SSH | Keys only, no passwords or keyboard-interactive, no X11, root by key only, `MaxAuthTries 3` | password login refused on all hosts |
-| Credentials | Every automation key pinned with `from=` to the one machine that uses it; the owner key has a passphrase | same key from an unlisted source refused |
-| Segmentation | Lab reaches the internet but cannot open connections to the home network | node → home router refused; internet and DNS still work |
+| Ingress | No port forwards, UPnP off. Tailscale is the only way in; remote traffic goes through the gateway first, with each node's own tailnet address as a fallback ([ADR-0002](docs/decisions/0002-tailscale-only-ingress.md)) | every node sees the owner's sessions arrive from the gateway's lab address; the gateway's upstream side accepts only Tailscale's WireGuard port; the ISP router's settings are checked by hand |
+| SSH | Keys only, no passwords or keyboard-interactive, no X11, root by key only, `MaxAuthTries 3` | `sshd -T` on all four; password login refused |
+| Credentials | Automation keys pinned with `from=` to the machine that uses it; the owner key has a passphrase. Key files are exclusive: a key not in the inventory is removed, and the role stops unless the owner's key stays | same key from an unlisted source refused; an unused, unpinned root key found on 2026-11-23 is gone; owner, CI and runner keys still log in |
+| Segmentation | Lab reaches the internet but cannot open connections to the home network | from node2: home router times out; internet and DNS work (2026-11-23) |
 | Services | Prometheus on `127.0.0.1`; Grafana and the wiki on node1's lab address, published on the tailnet by the gateway over HTTPS | Prometheus refused from the network; Grafana healthy through the gateway |
 | Storage | NFS exports list each client (three, including the gateway), `root_squash` | exports reviewed; role refuses wildcard exports |
 | Patching | Unattended upgrades everywhere, including Tailscale and Docker CE; nodes reboot through Slurm after their running jobs when an update needs it; Dependabot for actions, tools and monitoring images ([patching](docs/patching.md), [ADR-0008](docs/decisions/0008-unattended-patching-and-drained-reboots.md)) | `make patch-status`; reboot script tested on every Slurm state |
@@ -123,7 +125,33 @@ Problems found during the hardening, and what they taught:
    written down: two schedulers share it, and multi-node steps that span it
    must start on the controller. ([ADR-0007](docs/decisions/0007-gateway-joins-slurm.md))
 7. **Encode, then prove.** Hand fixes were turned into roles, and a check-mode
-   run against the live gateway reports `changed=0`: code and reality agree.
+   run against all four machines reports `changed=0` (2026-11-23): code and
+   reality agree.
+8. **A pull request brings its own workflow.** GitHub runs a pull request's
+   version of the workflow files, so no guard inside this repository's
+   workflows can keep a fork off the self-hosted runner. The runner refuses
+   every job except the owner's manual deploy from `main`, in a hook that runs
+   before checkout. ([ADR-0005](docs/decisions/0005-self-hosted-runner-on-a-public-repo.md))
+9. **A container reaches its own host from its bridge address.** The runner
+   on node1 could log in everywhere except node1, where its connection arrived
+   from the Docker bridge instead of node1's lab address and `from=` refused
+   it. node1 alone also accepts that key from its Docker networks, which no
+   other machine can send from. ([access model](docs/security/access-model.md))
+10. **Installed is not running.** unattended-upgrades had kept the nodes'
+    packages patched, yet they had been up 54 days on a kernel three security
+    updates old: nothing rebooted them. They now reboot through Slurm, after
+    their running jobs. ([ADR-0008](docs/decisions/0008-unattended-patching-and-drained-reboots.md))
+11. **Docs are claims too.** Checking every statement and diagram here against
+    the live machines found a wrong NFS path, a stopped game server, listening
+    ports missing from the port matrix, an unused root key without `from=`,
+    one NAT rule repeated seven times and 41 leftover firewall rules. The last
+    three were fixed the same day, in code: key files are now exclusive, NAT
+    has its own nftables table, and retired rules are listed in the inventory.
+    ([verification](docs/verification.md#grounding-pass-2026-11-23))
+12. **An overlapping network beats the subnet route.** On a network that uses
+    the lab's own address range, a laptop's local route wins over Tailscale's
+    subnet route and the nodes time out. Jumping through the gateway by its
+    tailnet name still works; renumbering the lab is on the roadmap.
 
 Full log: [hardening log](docs/security/hardening-log.md). Decisions and their trade-offs: [ADRs](docs/decisions/README.md).
 
@@ -157,6 +185,25 @@ owner's manual deploy from `main`, before checkout. Nothing private is stored
 in GitHub; the runner's key and inventory are mounted read-only on node1
 ([ADR-0005](docs/decisions/0005-self-hosted-runner-on-a-public-repo.md),
 [sequence diagram](docs/cicd.md)).
+
+## Maintenance
+
+What runs by itself, and what is a person's job. Details and trade-offs:
+[patching](docs/patching.md), [ADR-0008](docs/decisions/0008-unattended-patching-and-drained-reboots.md).
+
+| When | What | How |
+|---|---|---|
+| Daily, automatic | Security updates on all four machines, plus Tailscale and Docker CE from their own repositories | unattended-upgrades (`auto_updates` role) |
+| Weekly, automatic | A node whose update needs a reboot is drained, rebooted after its running jobs and returned to service; a node someone drained on purpose is left alone | `reboot-when-drained.timer` → `scontrol reboot ASAP nextstate=RESUME` |
+| Weekly, review | Dependabot pull requests: the pinned actions and CI tools here; the monitoring images in the training project's repository (patch and minor only) | merge; for monitoring images, `docker compose pull && docker compose up -d` on node1 |
+| Any time | What each machine still needs: a waiting reboot, pending and held updates, the last unattended run | `make patch-status` (read-only) |
+| Any time | Drift: does every machine still match the code? | `make check`, or deploy in `check` mode: expect `changed=0` |
+| By hand | Gateway reboots (it routes the lab and runs training outside Slurm); non-security updates (`apt upgrade`; 24 to 35 waiting per machine on 2026-11-23); the held NVIDIA and Kubernetes packages | owner |
+
+Not managed by Ansible yet, so set up and updated by hand: the Docker Compose
+stacks (monitoring and the wiki on node1, the exporters on node0 and node2),
+the NFS client mounts, the two runner containers, the game server, and the
+munge key (on purpose: it is a secret, copied node to node).
 
 ## Quick start
 
@@ -218,6 +265,9 @@ Commands and results: [verification](docs/verification.md).
 - [ ] VLANs on a managed switch: separate trust zones for compute and services
 - [ ] Alerting (Alertmanager) for disk, NFS and Slurm node state
 - [ ] Encrypted off-host backups of node state
+- [x] `authorized_keys` managed exclusively, so a key Ansible does not know about is removed instead of kept (2026-11-23)
+- [ ] The NFS client mounts and the Docker Compose stacks as roles
+- [ ] Renumber the lab off a common home address range, so a remote network can never overlap it
 
 ## License
 

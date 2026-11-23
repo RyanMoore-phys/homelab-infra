@@ -37,13 +37,13 @@ flowchart TB
         wan["wan_if · Wi-Fi<br/>DHCP address on the home network"]
         tsif["tailscale0 · the way in<br/>subnet router for the lab<br/>tailscale serve :443 · :8443"]
         nf["netfilter<br/>ts-input / ts-forward, then ufw<br/>default DROP for input and routed<br/>MASQUERADE out wan_if"]
-        svc["local services<br/>dnsmasq :53 · exporters :9100 · :9835<br/>slurmd :6818 · RTX 5050 · NFS client"]
+        svc["local services<br/>dnsmasq :53 · exporters :9100 · :9835<br/>slurmd :6818 · RTX 5050 · NFS client<br/>training + its control service :8765"]
         lan["lan_if · Ethernet<br/>192.0.2.1/24 static"]
     end
     subgraph LAB[" "]
         sw{{"<b>Lab network · 192.0.2.0/24 · trusted</b><br/>Ethernet switch"}}
         n0["<b>node0</b> · .11<br/>NFS server · slurmctld · slurmd"]
-        n1["<b>node1</b> · .12<br/>Grafana · Prometheus · wiki<br/>Actions runner · slurmd"]
+        n1["<b>node1</b> · .12<br/>Grafana · Prometheus · wiki<br/>2 Actions runners · slurmd"]
         n2["<b>node2</b> · .13<br/>slurmd"]
     end
 
@@ -97,12 +97,15 @@ flowchart TB
 
 | Host | Inventory groups | Services | Ansible roles |
 |---|---|---|---|
-| gateway | `router`, `slurm_nodes` | routing, NAT, dnsmasq, Tailscale subnet router + `tailscale serve`, node and GPU exporters, slurmd with the GPU, NFS client | baseline + `router` + `slurm` |
-| node0 | `lab_nodes`, `nfs_server`, `slurm_nodes` | NFS v4.2 server, slurmctld, slurmd, node_exporter, game server | baseline + `nfs_server` + `slurm` |
-| node1 | `lab_nodes`, `slurm_nodes` | Grafana, Prometheus, wiki (Docker Compose), Slurm job board, Actions runners (one container per repository), slurmd, NFS client | baseline + `slurm` |
-| node2 | `lab_nodes`, `slurm_nodes` | slurmd, node_exporter, NFS client | baseline + `slurm` |
+| gateway | `router`, `slurm_nodes` | routing, NAT, dnsmasq, Tailscale subnet router + `tailscale serve`, node and GPU exporters, slurmd with the GPU, NFS client; the training project's real-time trainer and its control service (8765, tailnet only) | baseline + `router` + `slurm` |
+| node0 | `lab_nodes`, `nfs_server`, `slurm_nodes` | NFS v4.2 server, slurmctld, slurmd, node exporter (container); a game server unit, installed and stopped | baseline + `nfs_server` + `slurm` |
+| node1 | `lab_nodes`, `slurm_nodes` | Grafana, Prometheus, node exporter, the job board's collector and ingest (Docker Compose); a wiki behind Caddy (Docker Compose); Actions runners (one container per repository); slurmd, NFS client | baseline + `slurm` |
+| node2 | `lab_nodes`, `slurm_nodes` | slurmd, node exporter (container), NFS client | baseline + `slurm` |
 
 *Baseline* = `auto_updates`, `ssh_hardening`, `authorized_keys`, `sudo_nopasswd` (nodes), `firewall`.
+Read from each machine on 2026-11-23 (`ss`, `docker ps`, `systemctl`). The
+Docker stacks, NFS client mounts, runners and game server are set up by hand,
+not by these roles.
 
 ## 3. Compute and storage
 
@@ -114,9 +117,9 @@ gateway adds 12 CPUs and the GPU.
 
 ```mermaid
 flowchart TB
-    nfsd["<b>node0</b> · nfsd · TCP 2049<br/>/srv/data on local disk<br/>per-client exports · root_squash"]
-    m1["<b>node1</b><br/>NFS v4.2 client"]
-    m2["<b>node2</b><br/>NFS v4.2 client"]
+    nfsd["<b>node0</b> · nfsd · TCP 2049<br/>/srv/openmc on local disk<br/>per-client exports · root_squash"]
+    m1["<b>node1</b><br/>NFS v4.2 client · nofail"]
+    m2["<b>node2</b><br/>NFS v4.2 client · nofail"]
     mg["<b>gateway</b><br/>NFS v4.2 client · nofail"]
 
     nfsd -->|"NFS v4.2 · 2049"| m1
@@ -197,8 +200,8 @@ flowchart TB
     ne_gw["<b>gateway</b><br/>node_exporter :9100"]
     gpu["<b>gateway</b><br/>NVIDIA GPU exporter :9835"]
     ne1["<b>node1</b><br/>node-exporter container"]
-    ne0["<b>node0</b><br/>node_exporter :9100"]
-    ne2["<b>node2</b><br/>node_exporter :9100"]
+    ne0["<b>node0</b><br/>node-exporter container :9100"]
+    ne2["<b>node2</b><br/>node-exporter container :9100"]
 
     owner -->|"HTTPS"| serve
     serve -->|"HTTP over the lab"| graf

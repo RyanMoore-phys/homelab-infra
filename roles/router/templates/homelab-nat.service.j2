@@ -1,0 +1,17 @@
+# Managed by Ansible (router role).
+# Loads only the lab's own nftables table. Ubuntu's nftables.service stays off:
+# its default configuration flushes every rule, Tailscale's and ufw's included.
+[Unit]
+Description=NAT the lab out of the upstream interface (nftables table homelab_nat)
+Wants=network-pre.target
+Before=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/nftables.d/homelab-nat.nft
+ExecReload=/usr/sbin/nft -f /etc/nftables.d/homelab-nat.nft
+ExecStop=/usr/sbin/nft delete table ip homelab_nat
+
+[Install]
+WantedBy=multi-user.target

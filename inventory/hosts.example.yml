@@ -8,6 +8,8 @@ all:
     my_laptop_key: "ssh-ed25519 <your laptop public key> laptop"
     gateway_key: "ssh-ed25519 <gateway public key> gateway"
     ci_runner_key: "ssh-ed25519 <runner public key> ci-runner"   # mounted into the runner container on node1
+    # Key files are exclusive: the role refuses to write unless the admin account keeps this key
+    authorized_keys_owner_key: "{{ my_laptop_key }}"
   children:
     router:
       hosts:
@@ -67,7 +69,13 @@ all:
         # there (Docker's default pool). Off that host no TCP handshake can complete
         # from them. 198.51.100.0/24 stands in for that range here.
         node1: {lab_ip: 192.0.2.12, lan_if: eth0, ci_runner_from: ["192.0.2.12", "198.51.100.0/24"]}
-        node2: {lab_ip: 192.0.2.13, lan_if: eth0}
+        node2:
+          lab_ip: 192.0.2.13
+          lan_if: eth0
+          # Rules to retire, exactly as `ufw show added` prints them (without "ufw ")
+          firewall_rules_absent:
+            - "allow 69/udp"
+            - "allow from 192.0.2.0/24 to any port 111"
     nfs_server:
       hosts:
         node0:

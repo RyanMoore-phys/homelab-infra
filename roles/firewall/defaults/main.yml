@@ -11,3 +11,11 @@ firewall_trust_lab: false
 #   firewall_rules:
 #     - {port: "9100", proto: tcp, from: "{{ lab_cidr }}", interface: "{{ lan_if }}"}
 firewall_rules: []
+# Rules to retire, written exactly as `ufw show added` prints them without the
+# leading "ufw ", e.g. "allow 69/udp". Each is deleted if present. This role
+# only ever adds rules, so a rule made by hand or by an old setup stays until
+# it is listed here (2026-11-23: leftover netboot and duplicate rules).
+#   firewall_rules_absent:
+#     - "allow 69/udp"
+#     - "allow from 192.0.2.13 to any port 2049"
+firewall_rules_absent: []

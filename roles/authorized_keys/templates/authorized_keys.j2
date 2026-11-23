@@ -1,0 +1,3 @@
+{% for k in authorized_keys if k.user == item %}
+{{ ('from="' ~ (k.from | join(',')) ~ '" ') if (k.from | default([]) | length > 0) else '' }}{{ k.key }}
+{% endfor %}

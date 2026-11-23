@@ -4,7 +4,7 @@ Decision: [ADR-0007](../decisions/0007-gateway-joins-slurm.md). The inventory
 (`inventory/hosts.yml`, private) already carries the change: `gateway` in
 `slurm_nodes` with 12 CPUs, `RealMemory=15000`, `MemSpecLimit=2048` and its GPU
 as `gpu:rtx5050:1`; no cluster-wide per-job memory cap; one firewall rule on
-`gateway` (6818/tcp from the controller only); `gateway` added to the `/srv/data`
+`gateway` (6818/tcp from the controller only); `gateway` added to the `/srv/openmc`
 export. Values in angle brackets are in that inventory, never here.
 
 Run the steps in order; continue only when a step's **check** passes.
@@ -87,9 +87,9 @@ vault password, each machine still uses its own sudo password.
 
 ## 6. Mount the share on `gateway`
 ```bash
-ssh -t <login>@gateway 'sudo mkdir -p /srv/data \
-  && echo "<node0 lab address>:/srv/data /srv/data nfs vers=4.2,proto=tcp,hard,_netdev,nofail 0 0" | sudo tee -a /etc/fstab \
-  && sudo mount /srv/data && ls /srv/data/<project>'
+ssh -t <login>@gateway 'sudo mkdir -p /srv/openmc \
+  && echo "<node0 lab address>:/srv/openmc /srv/openmc nfs vers=4.2,proto=tcp,hard,_netdev,nofail 0 0" | sudo tee -a /etc/fstab \
+  && sudo mount /srv/openmc && ls /srv/openmc/<project>'
 ```
 `nofail` matters on the gateway: a missing share must never stop it booting.
 **Check:** the listing shows `code runs venv`.
@@ -99,7 +99,7 @@ ssh -t <login>@gateway 'sudo mkdir -p /srv/data \
 ssh <login>@node0
 srun -w gateway hostname                            # gateway
 srun -w gateway --gres=gpu:1 nvidia-smi -L             # the RTX 5050
-srun -w gateway ls /srv/data/<project>                  # the share, from a job
+srun -w gateway ls /srv/openmc/<project>                  # the share, from a job
 srun -N4 hostname                                   # all four machines
 ```
 
@@ -135,5 +135,5 @@ small-file writes through the NFS mount are slow (about 0.4 MB/s measured).
 ssh -t <login>@gateway 'sudo systemctl disable --now slurmd'
 # remove the gateway from slurm_nodes, its slurm_* lines, its export client and its 6818 rule in inventory/hosts.yml, then:
 .venv/bin/ansible-playbook -i inventory/hosts.yml playbooks/site.yml --diff --limit 'slurm_nodes:nfs_server' --ask-become-pass
-ssh -t <login>@gateway 'sudo umount /srv/data && sudo sed -i "\|/srv/data|d" /etc/fstab'
+ssh -t <login>@gateway 'sudo umount /srv/openmc && sudo sed -i "\|/srv/openmc|d" /etc/fstab'
 ```

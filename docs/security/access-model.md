@@ -37,7 +37,7 @@ a password; the `from=` pins are what keep a copied automation key useless.
 | Control | Setting | Why |
 |---|---|---|
 | Authentication | public key only; `PasswordAuthentication no`, `KbdInteractiveAuthentication no` | nothing to brute-force |
-| Root | `PermitRootLogin prohibit-password` | root only by key, only for the other repository's runner |
+| Root | `PermitRootLogin prohibit-password` | root only by key, for the other repository's runner (pinned to node1). Key files are exclusive: a key not in the inventory is removed. That is how an unused second root key without `from=`, found on 2026-11-23, was removed the same day |
 | Unattended sudo | admin account: password-free sudo on every machine (`sudo_nopasswd` role on the nodes) | CI deploys run as it; owner's choice over a separate account |
 | Source pinning | `from="<lab address>"` on every automation key. On node1 the CI key is also accepted from node1's own Docker networks, because the runner container reaches its own host from its bridge address; off node1 no TCP handshake can complete from those addresses | a copied key is useless anywhere else |
 | Normal path | nodes are reached through the gateway; sessions arrive from its lab address. Each node's own tailnet address is a fallback | one place to watch, without losing access if it fails |

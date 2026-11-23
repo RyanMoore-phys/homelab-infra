@@ -43,6 +43,28 @@
   loop_control:
     label: "{{ item.port }}/{{ item.proto | default('any') }}"
 
+- name: Read the rules ufw holds now
+  ansible.builtin.command: ufw show added
+  register: firewall_added
+  changed_when: false
+  check_mode: false
+  when: firewall_rules_absent | length > 0
+
+- name: Rules to retire that are still present
+  ansible.builtin.debug:
+    msg: "{{ firewall_rules_absent | select('in', firewall_retire_have) | list }}"
+  vars:
+    firewall_retire_have: "{{ firewall_added.stdout_lines | map('regex_replace', '^ufw ', '') | list }}"
+  when: firewall_rules_absent | length > 0
+
+- name: Retire them
+  ansible.builtin.command: "ufw delete {{ item }}"
+  loop: "{{ firewall_rules_absent }}"
+  when:
+    - firewall_rules_absent | length > 0
+    - ("ufw " ~ item) in firewall_added.stdout_lines
+  changed_when: true
+
 - name: Turn the firewall on
   community.general.ufw:
     state: enabled

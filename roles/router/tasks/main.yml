@@ -12,25 +12,80 @@
     line: 'DEFAULT_FORWARD_POLICY="DROP"'
   notify: Reload ufw
 
-- name: Look for an existing NAT rule (hand-written ones are respected)
-  ansible.builtin.command: grep -qxF -- "-A POSTROUTING -o {{ wan_if }} -j MASQUERADE" /etc/ufw/before.rules
-  register: router_nat_present
-  changed_when: false
-  failed_when: router_nat_present.rc not in [0, 1]
-  check_mode: false
+# NAT lives in its own nftables table (homelab_nat), not in ufw's before.rules:
+# ufw re-applies before.rules on every reload without flushing the nat table,
+# which stacked one MASQUERADE copy per reload (seven on 2026-11-23). The new
+# table goes in first and the old rule comes out after, so the lab never loses
+# its NAT.
+- name: Keep Ubuntu's nftables service off (its default config flushes every rule)
+  ansible.builtin.systemd_service:
+    name: nftables
+    enabled: false
 
-- name: NAT the lab out of the upstream interface
+- name: Make the directory for the lab's nftables table
+  ansible.builtin.file:
+    path: /etc/nftables.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the lab's NAT as its own nftables table
+  ansible.builtin.template:
+    src: homelab-nat.nft.j2
+    dest: /etc/nftables.d/homelab-nat.nft
+    owner: root
+    group: root
+    mode: "0644"
+    validate: nft -c -f %s
+  register: router_nat_table
+  notify: Reload the lab NAT
+
+- name: Write the service that loads it at boot
+  ansible.builtin.template:
+    src: homelab-nat.service.j2
+    dest: /etc/systemd/system/homelab-nat.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: router_nat_unit
+
+# In check mode neither file is written yet, so there is nothing to start.
+- name: Load the lab NAT now and at every boot
+  ansible.builtin.systemd_service:
+    name: homelab-nat
+    state: started
+    enabled: true
+    daemon_reload: true
+  when: not ansible_check_mode or (router_nat_table is not changed and router_nat_unit is not changed)
+
+- name: Remove the old NAT from ufw's before.rules (the block this role used to write)
   ansible.builtin.blockinfile:
     path: /etc/ufw/before.rules
-    insertbefore: BOF
     marker: "# {mark} homelab-infra NAT"
-    block: |
-      *nat
-      :POSTROUTING ACCEPT [0:0]
-      -A POSTROUTING -o {{ wan_if }} -j MASQUERADE
-      COMMIT
-  when: router_nat_present.rc != 0
-  notify: Reload ufw
+    state: absent
+
+- name: Remove the old NAT from ufw's before.rules (the same block written by hand)
+  ansible.builtin.replace:
+    path: /etc/ufw/before.rules
+    regexp: '^\*nat\n:POSTROUTING ACCEPT \[0:0\]\n-A POSTROUTING -o {{ wan_if }} -j MASQUERADE\nCOMMIT\n'
+    replace: ''
+    backup: true
+
+- name: Read the nat table for copies ufw left behind
+  ansible.builtin.command: iptables -t nat -S POSTROUTING
+  register: router_old_nat
+  changed_when: false
+  check_mode: false
+
+- name: Delete those copies (the nftables table masquerades the lab now)
+  ansible.builtin.shell: |
+    set -e
+    while iptables -t nat -C POSTROUTING -o {{ wan_if }} -j MASQUERADE 2>/dev/null; do
+      iptables -t nat -D POSTROUTING -o {{ wan_if }} -j MASQUERADE
+    done
+  when: ("-A POSTROUTING -o " ~ wan_if ~ " -j MASQUERADE") in router_old_nat.stdout_lines
+  changed_when: true
 
 # Rule order matters for routed traffic: ufw checks rules top-down, first match wins.
 - name: Deny lab -> home network (inserted at the top)

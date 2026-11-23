@@ -1,0 +1,16 @@
+#!/usr/sbin/nft -f
+# Managed by Ansible (router role). The lab's NAT out of the upstream interface.
+#
+# Kept out of ufw on purpose: ufw re-applies before.rules on every reload
+# without flushing the nat table, so a MASQUERADE line there gained one more
+# copy per reload (seven were found on 2026-11-23). Declaring, deleting and
+# redefining this table makes loading the file any number of times give the
+# same result.
+table ip homelab_nat
+delete table ip homelab_nat
+table ip homelab_nat {
+	chain postrouting {
+		type nat hook postrouting priority srcnat; policy accept;
+		ip saddr {{ lab_cidr }} oifname "{{ wan_if }}" masquerade
+	}
+}

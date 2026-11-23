@@ -27,7 +27,7 @@ Grafana (frser-sqlite, uid campaign-board)  reads that database, filtered by $sy
 * node1 runs both steps because it is a Slurm node with the client commands
   and the monitor host; the controller has no cron. Nothing is installed: the
   merge is standard-library Python piped into the existing ingest container.
-* The scripts live on the NFS share in `/srv/data/<project>/tools/`; their
+* The scripts live on the NFS share in `/srv/openmc/<project>/tools/`; their
   source and contracts are in the SkyBot repository (`tools/slurm_board_*.py`,
   `scripts/slurm_board_push.sh`, `tests/campaign/_slurm_board_smoke.py`).
 * The controller keeps a finished job for `MinJobAge` (300 s), so a 2-minute

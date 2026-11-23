@@ -1,9 +1,20 @@
-- name: Install SSH public keys, each limited to the addresses it may come from
+- name: The admin account keeps the owner's key (guard against locking the owner out)
+  ansible.builtin.assert:
+    that:
+      - authorized_keys_owner_key | length > 0
+      - >-
+        authorized_keys | selectattr('user', 'equalto', ansible_user)
+        | selectattr('key', 'equalto', authorized_keys_owner_key) | list | length > 0
+    fail_msg: >-
+      authorized_keys for {{ ansible_user }} must include authorized_keys_owner_key;
+      refusing to replace any key file on {{ inventory_hostname }}
+    quiet: true
+  when: authorized_keys_exclusive and authorized_keys | length > 0
+
+- name: Install each account's keys, each limited to where it may come from; remove unlisted keys
   ansible.posix.authorized_key:
-    user: "{{ item.user }}"
-    key: "{{ item.key }}"
-    key_options: "{{ ('from=\"' ~ (item.from | join(',')) ~ '\"') if (item.from | default([]) | length > 0) else omit }}"
+    user: "{{ item }}"
+    key: "{{ lookup('ansible.builtin.template', 'authorized_keys.j2') | trim }}"
+    exclusive: "{{ authorized_keys_exclusive }}"
     state: present
-  loop: "{{ authorized_keys }}"
-  loop_control:
-    label: "{{ item.user }}: {{ item.key.split(' ')[-1] }}"
+  loop: "{{ authorized_keys | map(attribute='user') | unique | list }}"

@@ -71,6 +71,19 @@ Decision: [ADR-0008](../decisions/0008-unattended-patching-and-drained-reboots.m
 | Monitoring containers pinned to versions nothing watched | Known vulnerabilities in Grafana or Prometheus go unnoticed | Dependabot on the monitoring stack's images, patch and minor versions |
 | No single view of what each machine still needs | Pending reboots and held packages found by accident | `make patch-status`, read-only |
 
+## 2026-11-23: grounding pass
+
+Every statement in the README and the diagrams was checked against the live
+machines ([verification](../verification.md#grounding-pass-2026-11-23)). The
+documentation was corrected where it was wrong. Found on the machines, and
+fixed the same day:
+
+| Finding | Risk | Fix |
+|---|---|---|
+| A second root key on the gateway, without `from=`, unused for 30 days | A copy of it opens root on the router from anywhere that reaches SSH | Key files are now exclusive (`authorized_keys_exclusive`): a key not in the inventory is removed. A guard stops the role unless the admin account keeps the owner's key; it caught a quoting mistake in the inventory before anything was written |
+| The lab's `MASQUERADE` rule seven times in `POSTROUTING` | None today (the first match wins), but the table grows with every firewall reload | The rule was hand-written into ufw's `before.rules`, which ufw re-applies without flushing. NAT now lives in its own nftables table (`homelab_nat`), loaded by `homelab-nat.service`, masquerading only the lab range; the old copies were deleted and stay at 0 across reloads |
+| Leftover firewall rules: node2 allows DHCP, TFTP, HTTP, DNS and HTTPS from anywhere; malformed address rules on node0-2 | Any service later started on those ports is open beyond the lab | `firewall_rules_absent` retires exact rules: 41 removed across the three nodes. Kept on purpose: node1's SSH from anywhere, which the runner container needs to reach its own host |
+
 ## Traps worth knowing
 
 1. **Docker publishes around ufw.** Bind every published port to an address.
