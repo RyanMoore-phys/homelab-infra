@@ -100,7 +100,8 @@ Problems found during the hardening, and what they taught:
    Prometheus were reachable from the whole network although ufw denied the
    ports: Docker's iptables chains run before ufw's. Prometheus now binds to
    localhost; web UIs are published by the gateway with `tailscale serve`.
-   ([ADR-0003](docs/decisions/0003-explicit-binds-and-gateway-published-uis.md))
+   ([ADR-0003](docs/decisions/0003-explicit-binds-and-gateway-published-uis.md),
+   [PM-004](docs/postmortems/pm-004-monitoring-exposed-past-the-firewall.md))
 2. **So does Tailscale.** Per-port ufw denies on `tailscale0` did nothing:
    `tailscaled` jumps to its own `ts-input`/`ts-forward` chains first. Reading
    the gateway's real chains also showed `ts-forward` accepts lab → tailnet
@@ -131,7 +132,8 @@ Problems found during the hardening, and what they taught:
    version of the workflow files, so no guard inside this repository's
    workflows can keep a fork off the self-hosted runner. The runner refuses
    every job except the owner's manual deploy from `main`, in a hook that runs
-   before checkout. ([ADR-0005](docs/decisions/0005-self-hosted-runner-on-a-public-repo.md))
+   before checkout. ([ADR-0005](docs/decisions/0005-self-hosted-runner-on-a-public-repo.md),
+   [PM-001](docs/postmortems/pm-001-runner-reachable-from-pull-requests.md))
 9. **A container reaches its own host from its bridge address.** The runner
    on node1 could log in everywhere except node1, where its connection arrived
    from the Docker bridge instead of node1's lab address and `from=` refused
@@ -140,7 +142,8 @@ Problems found during the hardening, and what they taught:
 10. **Installed is not running.** unattended-upgrades had kept the nodes'
     packages patched, yet they had been up 54 days on a kernel three security
     updates old: nothing rebooted them. They now reboot through Slurm, after
-    their running jobs. ([ADR-0008](docs/decisions/0008-unattended-patching-and-drained-reboots.md))
+    their running jobs. ([ADR-0008](docs/decisions/0008-unattended-patching-and-drained-reboots.md),
+    [PM-002](docs/postmortems/pm-002-nodes-running-an-old-kernel.md))
 11. **Docs are claims too.** Checking every statement and diagram here against
     the live machines found a wrong NFS path, a stopped game server, listening
     ports missing from the port matrix, an unused root key without `from=`,
@@ -154,6 +157,8 @@ Problems found during the hardening, and what they taught:
     tailnet name still works; renumbering the lab is on the roadmap.
 
 Full log: [hardening log](docs/security/hardening-log.md). Decisions and their trade-offs: [ADRs](docs/decisions/README.md).
+Incidents, written up blameless with timelines from the records: [postmortems](docs/postmortems/README.md)
+(PM-001 to PM-004, including the 21-hour CI outage a settings change caused).
 
 ## CI/CD
 
@@ -246,6 +251,7 @@ up without it. `make help` lists every target.
 ├── docs/
 │   ├── architecture.md · network.md · cicd.md · patching.md · verification.md
 │   ├── security/               # threat model, access model, hardening log
+│   ├── postmortems/            # PM-001 … 004, blameless incident write-ups
 │   ├── decisions/              # ADR-0001 … 0008
 │   └── runbooks/               # runner, router failover, Slurm, gateway in Slurm, job board, rollback
 ├── .github/workflows/          # ci.yml (hosted) · deploy.yml (self-hosted, gated)

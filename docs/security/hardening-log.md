@@ -1,5 +1,8 @@
 # Hardening log
 
+The incidents behind several entries are written up as blameless
+[postmortems](../postmortems/README.md), with timelines taken from the records.
+
 ## 2026-11-21, part 1: audit and first fixes
 
 Starting point: ufw on every machine, Tailscale on every machine, nothing
