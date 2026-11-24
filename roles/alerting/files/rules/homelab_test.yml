@@ -1,0 +1,227 @@
+# Unit tests for homelab.yml: synthetic series in, the alerts that must (and
+# must not) fire out. Run with `make rules` (promtool, in the same Prometheus
+# image node1 runs); CI runs them on every push.
+rule_files:
+  - homelab.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: the heartbeat is always on
+    interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: Watchdog
+        exp_alerts:
+          - exp_labels: {severity: none}
+            exp_annotations:
+              summary: Prometheus and Alertmanager are working
+              description: Always firing; the gateway reports on the phone when this heartbeat stops.
+
+  - name: a target down for 5 minutes, not before
+    interval: 1m
+    input_series:
+      - series: 'up{job="node", instance="node2:9100"}'
+        values: '1 1 0x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ExporterDown
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: ExporterDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: node, instance: "node2:9100"}
+            exp_annotations:
+              summary: "node2:9100 is not answering"
+              description: "Prometheus has not reached node2:9100 (node) for 5 minutes. The machine may be down, or only its exporter."
+
+  - name: a disk over 90 % full
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{instance="node2:9100", mountpoint="/", fstype="ext4", device="/dev/sda2"}'
+        values: '5x30'
+      - series: 'node_filesystem_size_bytes{instance="node2:9100", mountpoint="/", fstype="ext4", device="/dev/sda2"}'
+        values: '100x30'
+      # The NFS share is node0's disk seen from a client: never counted twice.
+      - series: 'node_filesystem_avail_bytes{instance="node1:9100", mountpoint="/srv/openmc", fstype="nfs4", device="share"}'
+        values: '1x30'
+      - series: 'node_filesystem_size_bytes{instance="node1:9100", mountpoint="/srv/openmc", fstype="nfs4", device="share"}'
+        values: '100x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: DiskAlmostFull
+        exp_alerts:
+          - exp_labels: {severity: critical, instance: "node2:9100", mountpoint: "/", fstype: ext4, device: /dev/sda2}
+            exp_annotations:
+              summary: "node2:9100: / is over 90 % full"
+              description: "5% free on /."
+
+  - name: a disk that will fill within a day
+    interval: 5m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{instance="node2:9100", mountpoint="/", fstype="ext4", device="/dev/sda2"}'
+        values: '14-0.0833x60'
+      - series: 'node_filesystem_size_bytes{instance="node2:9100", mountpoint="/", fstype="ext4", device="/dev/sda2"}'
+        values: '100x60'
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: DiskWillFill
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: "node2:9100", mountpoint: "/", fstype: ext4, device: /dev/sda2}
+            exp_annotations:
+              summary: "node2:9100: / will fill within a day"
+              description: "Under 15 % free, and at the last 6 hours' rate it runs out within 24 hours."
+
+  - name: a reboot waiting for 8 days
+    interval: 5m
+    input_series:
+      - series: 'node_reboot_required{instance="node2:9100"}'
+        values: '0 1x2500'
+    alert_rule_test:
+      - eval_time: 100h
+        alertname: RebootOverdue
+        exp_alerts: []
+      - eval_time: 200h
+        alertname: RebootOverdue
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: "node2:9100"}
+            exp_annotations:
+              summary: "node2:9100 has waited 8 days for a reboot"
+              description: "An update needs a reboot. The weekly drained reboot did not happen, or this is the gateway, which the owner reboots."
+
+  - name: security updates waiting, other updates ignored
+    interval: 5m
+    input_series:
+      - series: 'apt_upgrades_pending{instance="node2:9100", origin="Ubuntu:resolute/resolute-security", arch="amd64"}'
+        values: '2x1000'
+      - series: 'apt_upgrades_pending{instance="node1:9100", origin="Ubuntu:resolute/resolute-updates", arch="amd64"}'
+        values: '5x1000'
+    alert_rule_test:
+      - eval_time: 80h
+        alertname: SecurityUpdatesStuck
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: "node2:9100"}
+            exp_annotations:
+              summary: "node2:9100 has had security updates waiting for 3 days"
+              description: "unattended-upgrades installs these daily; when they wait this long, something blocks it."
+
+  - name: unattended-upgrades silent for 2 days
+    interval: 5m
+    input_series:
+      - series: 'homelab_unattended_upgrades_last_run_seconds{instance="node2:9100"}'
+        values: '0x700'
+    alert_rule_test:
+      - eval_time: 47h
+        alertname: UnattendedUpgradesNotRunning
+        exp_alerts: []
+      - eval_time: 52h
+        alertname: UnattendedUpgradesNotRunning
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: "node2:9100"}
+            exp_annotations:
+              summary: "node2:9100: unattended-upgrades has not run for 2 days"
+              description: "Its log has not been written for 2 days; daily security updates are not being installed."
+
+  - name: a Slurm node not responding
+    interval: 1m
+    input_series:
+      - series: 'homelab_slurm_node_responding{instance="skybot:9100", node="node2"}'
+        values: '1 0x20'
+      - series: 'homelab_slurm_node_state{instance="skybot:9100", node="node2", state="idle"}'
+        values: '1x21'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SlurmNodeDown
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: SlurmNodeDown
+        exp_alerts:
+          - exp_labels: {severity: critical, instance: "skybot:9100", node: node2}
+            exp_annotations:
+              summary: "Slurm node node2 is down or not responding"
+              description: "The Slurm controller has not heard from node2, or marks it down, for 15 minutes. Jobs are not running there."
+
+  - name: a node drained for 3 days, an available node ignored
+    interval: 5m
+    input_series:
+      - series: 'homelab_slurm_node_unavailable_since_seconds{instance="skybot:9100", node="node1"}'
+        values: '1x1000'
+      - series: 'homelab_slurm_node_unavailable_since_seconds{instance="skybot:9100", node="node2"}'
+        values: '0x1000'
+    alert_rule_test:
+      - eval_time: 70h
+        alertname: SlurmDrainStuck
+        exp_alerts: []
+      - eval_time: 76h
+        alertname: SlurmDrainStuck
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: "skybot:9100", node: node1}
+            exp_annotations:
+              summary: "Slurm node node1 has been unavailable for 3 days"
+              description: "Drained or down for 3 days: a drained reboot waiting on a long job, or a node someone took out and did not bring back."
+
+  - name: an NFS client without its share
+    interval: 1m
+    input_series:
+      - series: 'up{job="node", instance="node1:9100", nfs_client="true"}'
+        values: '1x20'
+      - series: 'up{job="node", instance="main:9100", nfs_client="true"}'
+        values: '1x20'
+      - series: 'node_filesystem_size_bytes{instance="main:9100", mountpoint="/srv/openmc", fstype="nfs4", device="share"}'
+        values: '100x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: NFSShareMissing
+        exp_alerts:
+          - exp_labels: {severity: critical, instance: "node1:9100"}
+            exp_annotations:
+              summary: "node1:9100 has no NFS share mounted"
+              description: "This machine should mount the shared NFS export, and has no NFS file system. Jobs that read shared data there will fail."
+
+  - name: a certificate 10 days from expiry, a fresh one ignored
+    interval: 5m
+    input_series:
+      - series: 'homelab_tls_cert_not_after_seconds{instance="main:9100", port="8443"}'
+        values: '864000x30'
+      - series: 'homelab_tls_cert_not_after_seconds{instance="main:9100", port="443"}'
+        values: '10000000000x30'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: CertificateExpiring
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: "main:9100", port: "8443"}
+            exp_annotations:
+              summary: "The tailnet certificate on port 8443 expires within 14 days"
+              description: "Tailscale renews these by itself; one this close to expiring did not renew."
+
+  - name: a certificate that cannot be read
+    interval: 5m
+    input_series:
+      - series: 'homelab_tls_cert_not_after_seconds{instance="main:9100", port="443"}'
+        values: '0x700'
+    alert_rule_test:
+      - eval_time: 50h
+        alertname: CertificateUnreadable
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: "main:9100", port: "443"}
+            exp_annotations:
+              summary: "The certificate on port 443 could not be read for 2 days"
+              description: "The gateway's daily check could not read the certificate served on this tailnet port."
+      - eval_time: 50h
+        alertname: CertificateExpiring
+        exp_alerts: []
+
+  - name: a hot GPU
+    interval: 1m
+    input_series:
+      - series: 'nvidia_smi_temperature_gpu{instance="main:9835", uuid="GPU-0"}'
+        values: '90x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: GPUHot
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: "main:9835", uuid: GPU-0}
+            exp_annotations:
+              summary: "The GPU on main:9835 has been above 85 °C for 10 minutes"
+              description: "Currently 90 °C."

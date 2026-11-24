@@ -1,0 +1,11 @@
+# Alert rules and Alertmanager on the monitoring host (node1). Prometheus is
+# the training project's; it includes the rules directory and sends alerts to
+# this Alertmanager over the monitoring stack's network.
+alerting_rules_dir: /srv/monitoring/rules
+alerting_alertmanager_dir: /srv/monitoring/alertmanager
+alerting_alertmanager_image: prom/alertmanager:v0.28.1
+# The monitoring stack's Docker network, which Prometheus is on.
+alerting_monitor_network: skybot-monitor_default
+# Where ntfy runs (the gateway) and how Alertmanager reaches it: its lab address.
+alerting_ntfy_host: "{{ groups['router'][0] }}"
+alerting_ntfy_url: "http://{{ hostvars[alerting_ntfy_host].lab_ip }}:{{ ntfy_port }}"

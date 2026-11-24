@@ -1,0 +1,14 @@
+# promtool checks the whole configuration, included files and all, before
+# Prometheus is told to re-read it. A bad file stops the play here instead of
+# leaving Prometheus on a configuration it rejected.
+- name: Check and reload Prometheus
+  ansible.builtin.shell: |
+    set -eo pipefail
+    if docker ps --format '{{ '{{' }}.Names{{ '}}' }}' | grep -qx '{{ prometheus_targets_container }}'; then
+      docker exec {{ prometheus_targets_container }} promtool check config /etc/prometheus/prometheus.yml
+      docker kill -s HUP {{ prometheus_targets_container }}
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: true
+  when: not ansible_check_mode

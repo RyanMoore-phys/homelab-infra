@@ -1,0 +1,50 @@
+# ntfy, the push server that delivers alerts to the owner's phone. It runs on
+# the gateway, the one machine that is not the monitoring host, so the gateway
+# can still report when monitoring itself is down.
+ntfy_listen: "{{ lab_ip }}:{{ ntfy_port }}"
+# The account the service runs as: ntfy's own package runs it as "ntfy" (User=
+# in its ntfy.service). The role makes the account and the data directories
+# before the package, so its restart finds them readable. Ubuntu's build used
+# "_ntfy"; the role replaces that build (see ntfy_min_version).
+ntfy_user: ntfy
+# The oldest ntfy whose built-in "alertmanager" template was tested here
+# (2026-11-24). Ubuntu Pro's ESM source ships 2.11, which has no such template,
+# at a priority above any normal source: the phone got raw JSON (2026-11-23).
+# The role pins ntfy's own repository for this one package and checks this.
+ntfy_min_version: "2.38.1"
+# The HTTPS port the gateway publishes it on over the tailnet (tailscale
+# serve). The same port must be listed in router_tailscale_serve, pointing at
+# ntfy_listen. The base URL is built from the gateway's tailnet name at deploy
+# time, so no tailnet name is stored anywhere.
+ntfy_https_port: 8444
+# iPhones need a wake-up from ntfy.sh for instant notifications from a
+# self-hosted server. Only a message ID goes there; the alert text never
+# leaves the lab (owner decision 2026-11-23). Empty turns it off.
+ntfy_upstream_base_url: "https://ntfy.sh"
+
+# The port and topic names are shared with Alertmanager: playbooks/group_vars/all.yml.
+
+# ntfy's apt repository and the fingerprint of its signing key: the key is
+# checked against this before apt trusts it.
+ntfy_apt_url: https://archive.ntfy.sh/apt
+ntfy_key_url: https://archive.ntfy.sh/apt/keyring.gpg
+ntfy_key_fingerprint: 55BA774A6F5EE67431E4B6B7CFDB962D4F1EC4AF
+# The key file's own checksum (2026-11-24). With it, an existing key is not
+# fetched again, and check mode no longer reports a change it cannot verify.
+ntfy_key_sha256: 9bf8ec8d16177eecd0ada32688799cf23f60f92386c23f3ad07f69b6a2ecde58
+
+# Service accounts (no one logs in as them; each publishes or reads with a
+# token kept root-only on the gateway): what each may do on which topic.
+ntfy_service_users:
+  - name: alertmanager
+    access:
+      - {topic: "{{ ntfy_alert_topic }}", permission: write-only}
+      - {topic: "{{ ntfy_heartbeat_topic }}", permission: write-only}
+  - name: watchdog
+    access:
+      - {topic: "{{ ntfy_heartbeat_topic }}", permission: read-only}
+      - {topic: "{{ ntfy_alert_topic }}", permission: write-only}
+
+# The watchdog: Alertmanager sends a heartbeat every 5 minutes; if none has
+# arrived in this window, the gateway says so on the alert topic itself.
+ntfy_watchdog_window: 15m

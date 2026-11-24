@@ -87,6 +87,25 @@ fixed the same day:
 | The lab's `MASQUERADE` rule seven times in `POSTROUTING` | None today (the first match wins), but the table grows with every firewall reload | The rule was hand-written into ufw's `before.rules`, which ufw re-applies without flushing. NAT now lives in its own nftables table (`homelab_nat`), loaded by `homelab-nat.service`, masquerading only the lab range; the old copies were deleted and stay at 0 across reloads |
 | Leftover firewall rules: node2 allows DHCP, TFTP, HTTP, DNS and HTTPS from anywhere; malformed address rules on node0-2 | Any service later started on those ports is open beyond the lab | `firewall_rules_absent` retires exact rules: 41 removed across the three nodes. Kept on purpose: node1's SSH from anywhere, which the runner container needs to reach its own host |
 
+## 2026-11-23: one exporter per machine
+
+| Finding | Risk | Fix |
+|---|---|---|
+| Three hand-made node exporters: a binary on the gateway, containers on node0 and node2, plus one in node1's monitoring stack | No updates; each set up differently; nothing recorded how | Ubuntu's packaged exporter on every machine, on the lab address, with security updates through unattended-upgrades (`node_exporter` role) |
+| `group_vars/all.yml` sat at the repository root, where Ansible never reads it | Shared settings silently ignored; it only worked because the SSH role's defaults matched | Moved to `playbooks/group_vars/`, which every inventory loads |
+| node1's live monitoring stack had drifted from the training repository: Prometheus kept 15 days instead of 120, and scraped by address, so the dashboards' `main:9100` filters matched nothing | History lost after two weeks; dashboard panels empty | Retention restored to 120 days with a 20 GB cap; targets generated from the inventory and named after the machines; the same edits made in the training repository |
+| Scraping node1's own exporter from the Prometheus container | Arrives from the Docker bridge, which node1's firewall refused | node1 admits 9100 from Docker's networks only (same reasoning as the runner's key) |
+
+## 2026-11-23/24: alerting
+
+| Finding | Risk | Fix |
+|---|---|---|
+| Nothing watched the metrics: every failure in the postmortems was found by a person | Outages, full disks and stuck patching go unnoticed for days | 13 alert rules in the repository, each unit-tested in CI; Alertmanager on node1; ntfy on the gateway; a watchdog for the monitoring itself ([ADR-0009](../decisions/0009-alerting-through-self-hosted-ntfy.md)) |
+| apt installed Ubuntu Pro's ntfy 2.11 instead of ntfy's own 2.38.1: the ESM Apps source is pinned at priority 510, above every other repository | The first live alert reached the phone as raw JSON: 2.11 has no `alertmanager` template | `/etc/apt/preferences.d/ntfy` pins ntfy's repository for that one package; the role checks the installed version against the one that was tested |
+| ntfy's own package runs as `ntfy`, Ubuntu's as `_ntfy`, and neither package makes the data directories that ntfy needs before its first start | The service fails at start, or the new build cannot open the old databases | The role makes the account and directories and owns the databases before the package installs |
+| `get_url` reported a change in every check-mode run for a key file that was already in place (ansible-core 2.21 fetches it again and, in check mode, compares against nothing) | A drift check that never reads `changed=0` hides real drift | The key file's SHA-256 is pinned; an existing, matching key is not fetched at all |
+| The owner's ntfy login had no password, so the phone app reported "not authorized to read this topic" | No alerts on the phone, with the server working | Runbook: the login is made and its password typed by the owner (`ntfy user add`), with read access to the alert topic only |
+
 ## Traps worth knowing
 
 1. **Docker publishes around ufw.** Bind every published port to an address.
@@ -101,3 +120,8 @@ fixed the same day:
    refuse to run over the path it removes.
 7. **Ubuntu 26.04 ships sudo-rs as `sudo`**, which does not honour Ansible's
    prompt option; point `ansible_become_exe` at the classic `sudo.ws`.
+8. **Ubuntu Pro's ESM sources outrank every other repository** (apt priority
+   510). A package that also comes from its vendor's repository installs from
+   ESM, often years older, unless that repository is pinned higher.
+9. **`get_url` reports a change in check mode** for a file already in place,
+   unless it is given the file's checksum.

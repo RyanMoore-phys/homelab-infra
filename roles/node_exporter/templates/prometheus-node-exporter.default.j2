@@ -1,0 +1,4 @@
+# Managed by Ansible (node_exporter role). Read by prometheus-node-exporter.service.
+# The lab address only; *.prom files in the textfile directory are published
+# with this machine's own metrics.
+ARGS="--web.listen-address={{ node_exporter_listen }} --collector.textfile.directory={{ node_exporter_textfile_dir }}"

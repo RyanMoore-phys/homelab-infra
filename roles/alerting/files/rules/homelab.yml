@@ -1,0 +1,141 @@
+# Alert rules for the lab. Deployed by the alerting role to node1, where
+# Prometheus includes them. Each rule has a unit test in homelab_test.yml
+# (make rules). Severity "critical" reaches the phone at high priority,
+# "warning" at normal priority.
+groups:
+  - name: homelab
+    rules:
+      # Always firing. Alertmanager forwards it to the heartbeat topic every
+      # 5 minutes; the gateway reports when it stops arriving.
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: none
+        annotations:
+          summary: Prometheus and Alertmanager are working
+          description: Always firing; the gateway reports on the phone when this heartbeat stops.
+
+      - alert: ExporterDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} is not answering"
+          description: "Prometheus has not reached {{ $labels.instance }} ({{ $labels.job }}) for 5 minutes. The machine may be down, or only its exporter."
+
+      - alert: DiskAlmostFull
+        expr: >-
+          node_filesystem_avail_bytes{fstype!~"tmpfs|devtmpfs|overlay|squashfs|nfs4?|vfat|fuse.*"}
+          / node_filesystem_size_bytes{fstype!~"tmpfs|devtmpfs|overlay|squashfs|nfs4?|vfat|fuse.*"}
+          < 0.10
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }}: {{ $labels.mountpoint }} is over 90 % full"
+          description: "{{ $value | humanizePercentage }} free on {{ $labels.mountpoint }}."
+
+      - alert: DiskWillFill
+        expr: >-
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|devtmpfs|overlay|squashfs|nfs4?|vfat|fuse.*"}
+          / node_filesystem_size_bytes{fstype!~"tmpfs|devtmpfs|overlay|squashfs|nfs4?|vfat|fuse.*"} < 0.15)
+          and predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|devtmpfs|overlay|squashfs|nfs4?|vfat|fuse.*"}[6h], 24 * 3600) < 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: {{ $labels.mountpoint }} will fill within a day"
+          description: "Under 15 % free, and at the last 6 hours' rate it runs out within 24 hours."
+
+      # The nodes reboot themselves through Slurm every Sunday; the gateway's
+      # reboots are the owner's. Eight days means the routine did not happen.
+      - alert: RebootOverdue
+        expr: node_reboot_required == 1
+        for: 8d
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} has waited 8 days for a reboot"
+          description: "An update needs a reboot. The weekly drained reboot did not happen, or this is the gateway, which the owner reboots."
+
+      - alert: SecurityUpdatesStuck
+        expr: sum by (instance) (apt_upgrades_pending{origin=~".*-security"}) > 0
+        for: 3d
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} has had security updates waiting for 3 days"
+          description: "unattended-upgrades installs these daily; when they wait this long, something blocks it."
+
+      - alert: UnattendedUpgradesNotRunning
+        expr: time() - homelab_unattended_upgrades_last_run_seconds > 2 * 86400
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: unattended-upgrades has not run for 2 days"
+          description: "Its log has not been written for 2 days; daily security updates are not being installed."
+
+      - alert: SlurmNodeDown
+        expr: >-
+          homelab_slurm_node_responding == 0
+          or on (node) homelab_slurm_node_state{state=~"down|fail|failing|unknown"} == 1
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Slurm node {{ $labels.node }} is down or not responding"
+          description: "The Slurm controller has not heard from {{ $labels.node }}, or marks it down, for 15 minutes. Jobs are not running there."
+
+      - alert: SlurmDrainStuck
+        expr: >-
+          homelab_slurm_node_unavailable_since_seconds > 0
+          and (time() - homelab_slurm_node_unavailable_since_seconds) > 3 * 86400
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slurm node {{ $labels.node }} has been unavailable for 3 days"
+          description: "Drained or down for 3 days: a drained reboot waiting on a long job, or a node someone took out and did not bring back."
+
+      # NFS clients are labelled in the scrape targets, from the NFS exports in the inventory.
+      - alert: NFSShareMissing
+        expr: >-
+          max by (instance) (up{job="node", nfs_client="true"}) == 1
+          unless on (instance) max by (instance) (node_filesystem_size_bytes{fstype=~"nfs4?"})
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} has no NFS share mounted"
+          description: "This machine should mount the shared NFS export, and has no NFS file system. Jobs that read shared data there will fail."
+
+      - alert: CertificateExpiring
+        expr: >-
+          homelab_tls_cert_not_after_seconds > 0
+          and (homelab_tls_cert_not_after_seconds - time()) < 14 * 86400
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "The tailnet certificate on port {{ $labels.port }} expires within 14 days"
+          description: "Tailscale renews these by itself; one this close to expiring did not renew."
+
+      - alert: CertificateUnreadable
+        expr: homelab_tls_cert_not_after_seconds == 0
+        for: 2d
+        labels:
+          severity: warning
+        annotations:
+          summary: "The certificate on port {{ $labels.port }} could not be read for 2 days"
+          description: "The gateway's daily check could not read the certificate served on this tailnet port."
+
+      - alert: GPUHot
+        expr: nvidia_smi_temperature_gpu > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The GPU on {{ $labels.instance }} has been above 85 °C for 10 minutes"
+          description: "Currently {{ $value }} °C."

@@ -1,0 +1,83 @@
+# 1. Retire exporters set up by hand; they hold port 9100.
+- name: Look for exporter units set up by hand
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ item }}.service"
+  loop: "{{ node_exporter_retire_units }}"
+  register: node_exporter_old_units
+
+- name: Stop and disable them
+  ansible.builtin.systemd_service:
+    name: "{{ item.item }}"
+    state: stopped
+    enabled: false
+  loop: "{{ node_exporter_old_units.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Remove their unit files
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}.service"
+    state: absent
+  loop: "{{ node_exporter_retire_units }}"
+  notify: Reload systemd
+
+- name: List the containers on this machine
+  ansible.builtin.command: docker ps -a --format "{{ '{{' }}.Names{{ '}}' }}"
+  register: node_exporter_containers
+  changed_when: false
+  check_mode: false
+  when: node_exporter_retire_containers | length > 0
+
+- name: Exporter containers set up by hand that are still here
+  ansible.builtin.debug:
+    msg: "{{ node_exporter_retire_containers | intersect(node_exporter_containers.stdout_lines) }}"
+  when: node_exporter_retire_containers | length > 0
+
+- name: Remove them (their compose files and volumes stay on disk)
+  ansible.builtin.command: "docker rm -f {{ item }}"
+  loop: "{{ node_exporter_retire_containers | intersect(node_exporter_containers.stdout_lines | default([])) }}"
+  changed_when: true
+
+# 2. The packaged exporter, configured before it is installed: the package
+#    keeps this file (Ansible's apt passes --force-confold) and starts on the
+#    lab address straight away.
+- name: Point the exporter at the lab address and the textfile directory
+  ansible.builtin.template:
+    src: prometheus-node-exporter.default.j2
+    dest: /etc/default/prometheus-node-exporter
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart the node exporter
+
+- name: Install the node exporter and Ubuntu's textfile collectors
+  ansible.builtin.apt:
+    name:
+      - prometheus-node-exporter
+      - prometheus-node-exporter-collectors
+    state: present
+    install_recommends: false
+
+- name: Keep the exporter running
+  ansible.builtin.systemd_service:
+    name: prometheus-node-exporter
+    state: started
+    enabled: true
+  when: not ansible_check_mode
+
+- name: Keep Ubuntu's apt metrics timer on (pending and held updates, reboot required)
+  ansible.builtin.systemd_service:
+    name: prometheus-node-exporter-apt.timer
+    state: started
+    enabled: true
+  when: not ansible_check_mode
+
+- name: Apply a changed listen address now, not at the end of the play
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the exporter on the lab address
+  ansible.builtin.wait_for:
+    host: "{{ node_exporter_listen.split(':')[0] }}"
+    port: "{{ node_exporter_listen.split(':')[1] | int }}"
+    timeout: 30
+  when: not ansible_check_mode

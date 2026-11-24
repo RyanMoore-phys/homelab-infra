@@ -1,0 +1,35 @@
+#!/bin/sh
+# Managed by Ansible (ntfy role). Run every 5 minutes by homelab-watchdog.timer.
+#
+# Prometheus keeps one alert always firing ("Watchdog"), and Alertmanager
+# forwards it to the heartbeat topic every 5 minutes. If no heartbeat has
+# reached this server within the window, something on the path
+# Prometheus -> Alertmanager -> ntfy is broken, or node1 is down, and no other
+# alert can arrive either. So the gateway says so on the alert topic itself:
+# once when the heartbeat stops, once when it comes back.
+set -eu
+base="http://{{ ntfy_listen }}"
+token=$(cat /etc/ntfy/watchdog.token)
+state_dir=/var/lib/homelab-watchdog
+mkdir -p "$state_dir"
+state=$(cat "$state_dir/state" 2>/dev/null || echo up)
+
+beats=$(curl -fsS -m 15 -H "Authorization: Bearer $token" \
+  "$base/{{ ntfy_heartbeat_topic }}/json?poll=1&since={{ ntfy_watchdog_window }}" \
+  | grep -c '"event":"message"' || true)
+
+send() {
+  curl -fsS -m 15 -o /dev/null -H "Authorization: Bearer $token" \
+    -H "Title: $1" -H "Priority: $2" -H "Tags: $3" -d "$4" \
+    "$base/{{ ntfy_alert_topic }}"
+}
+
+if [ "$beats" -eq 0 ] && [ "$state" = up ]; then
+  send "Monitoring is down" high rotating_light \
+    "No heartbeat from Prometheus and Alertmanager on node1 for {{ ntfy_watchdog_window }}. Other alerts cannot reach you until this clears."
+  echo down > "$state_dir/state"
+elif [ "$beats" -gt 0 ] && [ "$state" = down ]; then
+  send "Monitoring is back" default white_check_mark \
+    "Heartbeats from Prometheus and Alertmanager on node1 are arriving again."
+  echo up > "$state_dir/state"
+fi

@@ -1,0 +1,12 @@
+# Ubuntu's packaged node exporter on every machine: one version everywhere,
+# security updates through unattended-upgrades, listening on the lab address
+# only. Ubuntu's textfile collectors come with it; their apt timer publishes
+# apt_upgrades_pending, apt_upgrades_held and node_reboot_required.
+node_exporter_listen: "{{ lab_ip }}:9100"
+
+# Exporters set up by hand before this role. They hold port 9100, so they are
+# removed before the package starts. Per host, in the inventory:
+#   node_exporter_retire_units: [node_exporter]                # systemd units
+#   node_exporter_retire_containers: [node-exporter, gpu-metrics]
+node_exporter_retire_units: []
+node_exporter_retire_containers: []

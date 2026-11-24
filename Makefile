@@ -7,7 +7,7 @@ INV   ?= inventory/hosts.yml
 LIMIT ?= all
 
 .DEFAULT_GOAL := help
-.PHONY: help setup guards lint syntax test check patch-status check-nodes apply check-host apply-host clean
+.PHONY: help setup guards lint syntax rules test check patch-status check-nodes apply check-host apply-host clean
 
 help: ## List targets
 	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -34,7 +34,11 @@ syntax: setup ## Playbook syntax against the example inventory
 	$(BIN)/ansible-playbook -i inventory/hosts.example.yml playbooks/site.yml --syntax-check
 	$(BIN)/ansible-playbook -i inventory/hosts.example.yml playbooks/patch-status.yml --syntax-check
 
-test: guards lint syntax ## Everything CI runs (no lab access needed)
+rules: ## Alert rules' unit tests (promtool, in the Prometheus image node1 runs; needs Docker)
+	docker run --rm -v "$(CURDIR)/roles/alerting/files/rules:/rules:ro" --entrypoint promtool \
+	  prom/prometheus:v2.54.1 test rules /rules/homelab_test.yml
+
+test: guards lint syntax rules ## Everything CI runs (no lab access needed)
 
 check: setup ## Dry run against the real lab: shows what WOULD change (LIMIT=host|group)
 	$(BIN)/ansible-playbook -i $(INV) playbooks/site.yml --check --diff --limit '$(LIMIT)'

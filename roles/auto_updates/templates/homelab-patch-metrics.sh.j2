@@ -1,0 +1,21 @@
+#!/bin/sh
+# Managed by Ansible (auto_updates role). Run hourly by homelab-patch-metrics.timer.
+# Publishes when unattended-upgrades last ran, for the node exporter's textfile
+# collector. Ubuntu's apt collector already publishes pending and held updates
+# and whether a reboot is required.
+set -eu
+dir="{{ node_exporter_textfile_dir }}"
+[ -d "$dir" ] || exit 0
+
+log=/var/log/unattended-upgrades/unattended-upgrades.log
+last=0
+[ -f "$log" ] && last=$(stat -c %Y "$log")
+
+tmp=$(mktemp "$dir/.homelab_patch.XXXXXX")
+cat > "$tmp" <<EOF
+# HELP homelab_unattended_upgrades_last_run_seconds When unattended-upgrades last wrote its log (Unix time; 0: never).
+# TYPE homelab_unattended_upgrades_last_run_seconds gauge
+homelab_unattended_upgrades_last_run_seconds $last
+EOF
+chmod 0644 "$tmp"
+mv "$tmp" "$dir/homelab_patch.prom"

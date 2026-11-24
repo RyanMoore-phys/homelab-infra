@@ -34,3 +34,59 @@
     name: slurmd
     state: started
     enabled: true
+
+# Metrics for the node exporter's textfile collector, from the controller:
+# every node's state, whether it responds, and since when it is unavailable.
+- name: Publish every node's Slurm state, from the controller
+  when: inventory_hostname == slurm_controller
+  block:
+    - name: Write the Slurm metrics script
+      ansible.builtin.template:
+        src: homelab-slurm-metrics.sh.j2
+        dest: /usr/local/sbin/homelab-slurm-metrics
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Run it every minute
+      ansible.builtin.copy:
+        dest: "/etc/systemd/system/homelab-slurm-metrics.{{ item.ext }}"
+        content: "{{ item.content }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - ext: service
+          content: |
+            # Managed by Ansible (slurm role).
+            [Unit]
+            Description=Publish every node's Slurm state
+            After=slurmctld.service
+
+            [Service]
+            Type=oneshot
+            ExecStart=/usr/local/sbin/homelab-slurm-metrics
+        - ext: timer
+          content: |
+            # Managed by Ansible (slurm role).
+            [Unit]
+            Description=Slurm node state metrics, every minute
+
+            [Timer]
+            OnActiveSec=30s
+            OnUnitActiveSec=1min
+
+            [Install]
+            WantedBy=timers.target
+      loop_control:
+        label: "{{ item.ext }}"
+      register: slurm_metric_units
+
+    # In check mode the unit files are not written yet, so there is nothing to start.
+    - name: Start the Slurm metrics
+      ansible.builtin.systemd_service:
+        name: homelab-slurm-metrics.timer
+        state: started
+        enabled: true
+        daemon_reload: true
+      when: not ansible_check_mode or slurm_metric_units is not changed

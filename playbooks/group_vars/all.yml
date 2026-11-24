@@ -1,0 +1,25 @@
+# Defaults shared by every host. NOTHING here may identify the real lab:
+# addresses, interface names, keys and logins live in inventory/hosts.yml,
+# which is gitignored (see inventory/hosts.example.yml for its shape).
+#
+# This file sits next to the playbooks because Ansible reads group_vars only
+# beside the inventory or the playbook. Until 2026-11-23 it was at the
+# repository root, where it was never loaded; its SSH settings applied only
+# because the ssh_hardening role's defaults are identical.
+ssh_hardening_settings:
+  PasswordAuthentication: "no"
+  KbdInteractiveAuthentication: "no"
+  PermitEmptyPasswords: "no"
+  X11Forwarding: "no"
+  PermitRootLogin: prohibit-password
+  MaxAuthTries: 3
+
+# Where every machine's node exporter reads extra metrics (*.prom files).
+# Roles that report their own state (patching, Slurm, certificates) write here.
+node_exporter_textfile_dir: /var/lib/prometheus/node-exporter
+
+# Alerts reach the owner's phone through ntfy on the gateway. Shared because
+# both ends use them: ntfy (gateway) and Alertmanager (node1).
+ntfy_port: 2586
+ntfy_alert_topic: homelab-alerts
+ntfy_heartbeat_topic: homelab-heartbeat

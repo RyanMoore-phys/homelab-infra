@@ -1,0 +1,32 @@
+#!/bin/sh
+# Managed by Ansible (router role). Run daily by homelab-tls-metrics.timer.
+# Publishes when the certificate on each tailnet HTTPS port (tailscale serve)
+# expires, for the node exporter's textfile collector. The gateway's tailnet
+# name and address are read here at run time, never stored in the repository;
+# the name does not resolve on the gateway itself, so the address is dialled
+# and the name sent as SNI.
+set -eu
+dir="{{ node_exporter_textfile_dir }}"
+[ -d "$dir" ] || exit 0
+
+name=$(tailscale status --json 2>/dev/null \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))' 2>/dev/null) || name=""
+addr=$(tailscale ip -4 2>/dev/null | head -n 1) || addr=""
+
+tmp=$(mktemp "$dir/.homelab_tls.XXXXXX")
+{
+  echo "# HELP homelab_tls_cert_not_after_seconds When the certificate on a tailnet HTTPS port expires (Unix time; 0: could not be read)."
+  echo "# TYPE homelab_tls_cert_not_after_seconds gauge"
+  for port in {{ router_tailscale_serve | map(attribute='https_port') | join(' ') }}; do
+    end=""
+    if [ -n "$name" ] && [ -n "$addr" ]; then
+      end=$(echo | timeout 10 openssl s_client -connect "$addr:$port" -servername "$name" 2>/dev/null \
+        | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2) || end=""
+    fi
+    ts=0
+    [ -z "$end" ] || ts=$(date -d "$end" +%s 2>/dev/null || echo 0)
+    printf 'homelab_tls_cert_not_after_seconds{port="%s"} %s\n' "$port" "$ts"
+  done
+} > "$tmp"
+chmod 0644 "$tmp"
+mv "$tmp" "$dir/homelab_tls.prom"

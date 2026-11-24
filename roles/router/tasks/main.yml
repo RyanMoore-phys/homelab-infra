@@ -167,3 +167,59 @@
     label: "{{ item.https_port }}"
   when: ((item.https_port | string) ~ '=' ~ item.target) not in (router_serve_have | default([]))
   changed_when: true
+
+# Metric for the node exporter's textfile collector: when the certificate on
+# each published tailnet HTTPS port expires.
+- name: Publish when the tailnet certificates expire
+  when: router_tailscale_serve | length > 0
+  block:
+    - name: Write the certificate metrics script
+      ansible.builtin.template:
+        src: homelab-tls-metrics.sh.j2
+        dest: /usr/local/sbin/homelab-tls-metrics
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Run it daily
+      ansible.builtin.copy:
+        dest: "/etc/systemd/system/homelab-tls-metrics.{{ item.ext }}"
+        content: "{{ item.content }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - ext: service
+          content: |
+            # Managed by Ansible (router role).
+            [Unit]
+            Description=Publish when the tailnet certificates expire
+            After=tailscaled.service
+
+            [Service]
+            Type=oneshot
+            ExecStart=/usr/local/sbin/homelab-tls-metrics
+        - ext: timer
+          content: |
+            # Managed by Ansible (router role).
+            [Unit]
+            Description=Daily certificate metrics
+
+            [Timer]
+            OnActiveSec=2min
+            OnUnitActiveSec=1d
+
+            [Install]
+            WantedBy=timers.target
+      loop_control:
+        label: "{{ item.ext }}"
+      register: router_metric_units
+
+    # In check mode the unit files are not written yet, so there is nothing to start.
+    - name: Start the certificate metrics
+      ansible.builtin.systemd_service:
+        name: homelab-tls-metrics.timer
+        state: started
+        enabled: true
+        daemon_reload: true
+      when: not ansible_check_mode or router_metric_units is not changed

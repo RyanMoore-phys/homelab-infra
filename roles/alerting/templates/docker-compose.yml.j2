@@ -1,0 +1,29 @@
+# Managed by Ansible (alerting role). Alertmanager, in its own compose project,
+# on the monitoring stack's network so Prometheus reaches it by name. No port
+# is published: it is reachable only from that network.
+name: homelab-alerting
+
+services:
+  alertmanager:
+    image: {{ alerting_alertmanager_image }}
+    container_name: alertmanager
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./ntfy_token:/etc/alertmanager/ntfy_token:ro
+      - alertmanager_data:/alertmanager
+    networks: [monitor]
+    deploy:
+      resources:
+        limits: {cpus: "0.25", memory: 128M}
+
+networks:
+  monitor:
+    external: true
+    name: {{ alerting_monitor_network }}
+
+volumes:
+  alertmanager_data:

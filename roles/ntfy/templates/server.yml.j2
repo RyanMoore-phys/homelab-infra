@@ -1,0 +1,20 @@
+# Managed by Ansible (ntfy role). Read by ntfy.service.
+# Reached on the lab address by Alertmanager (node1) and the watchdog, and by
+# the owner's phone through `tailscale serve` (HTTPS, tailnet only).
+base-url: "{{ ntfy_base_url }}"
+listen-http: "{{ ntfy_listen }}"
+behind-proxy: true
+
+# Nothing is readable or writable without a login or a token.
+auth-file: /var/lib/ntfy/user.db
+auth-default-access: deny-all
+
+# Keeps messages for a day, so the phone catches up and the watchdog can look
+# back over its window.
+cache-file: /var/cache/ntfy/cache.db
+cache-duration: 24h
+{% if ntfy_upstream_base_url | length > 0 %}
+
+# iPhone wake-ups: only the message ID is sent to the upstream server.
+upstream-base-url: "{{ ntfy_upstream_base_url }}"
+{% endif %}

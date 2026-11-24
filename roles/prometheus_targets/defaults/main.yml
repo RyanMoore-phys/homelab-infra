@@ -1,0 +1,9 @@
+# What Prometheus scrapes is generated from the inventory, so a machine added
+# to the inventory is scraped after the next deploy. Prometheus itself runs in
+# the training project's monitoring stack on node1; its prometheus.yml
+# includes this directory (scrape_config_files: /etc/prometheus/homelab/scrape/*.yml),
+# mounted read-only from here.
+prometheus_targets_dir: /srv/monitoring/scrape
+# The Prometheus container to reload after a change (it re-reads included files on SIGHUP).
+prometheus_targets_container: prometheus
+# Per host, in the inventory (optional): gpu_exporter_port: 9835 adds a "gpu" target.

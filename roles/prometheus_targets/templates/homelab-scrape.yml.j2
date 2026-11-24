@@ -1,0 +1,32 @@
+# Managed by Ansible (homelab-infra, prometheus_targets role). Generated from
+# the inventory; included by Prometheus through scrape_config_files.
+# Instance labels are the inventory names ("main:9100"), which dashboards use.
+# Machines that mount the NFS share are labelled nfs_client="true" (from the
+# exports in the inventory), so an alert can notice the share missing.
+{% set gpu_hosts = [] %}
+{% for h in groups['all'] | sort if hostvars[h].gpu_exporter_port is defined %}
+{%   set _ = gpu_hosts.append(h) %}
+{% endfor %}
+{% set nfs_client_ips = [] %}
+{% for s in groups.get('nfs_server', []) %}
+{%   for export in hostvars[s].nfs_exports | default([]) %}
+{%     for client in export.clients | default([]) %}
+{%       set _ = nfs_client_ips.append(client.host) %}
+{%     endfor %}
+{%   endfor %}
+{% endfor %}
+scrape_configs:
+  - job_name: node
+    static_configs:
+{% for h in groups['all'] | sort if hostvars[h].lab_ip is defined %}
+      - targets: ["{{ hostvars[h].lab_ip }}:9100"]
+        labels: {instance: "{{ h }}:9100"{% if hostvars[h].lab_ip in nfs_client_ips %}, nfs_client: "true"{% endif %}}
+{% endfor %}
+{% if gpu_hosts | length > 0 %}
+  - job_name: gpu
+    static_configs:
+{% for h in gpu_hosts %}
+      - targets: ["{{ hostvars[h].lab_ip }}:{{ hostvars[h].gpu_exporter_port }}"]
+        labels: {instance: "{{ h }}:{{ hostvars[h].gpu_exporter_port }}"}
+{% endfor %}
+{% endif %}

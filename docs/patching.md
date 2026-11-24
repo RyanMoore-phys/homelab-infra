@@ -6,7 +6,7 @@ The decision and its trade-offs: [ADR-0008](decisions/0008-unattended-patching-a
 | What | Kept current by | How it lands |
 |---|---|---|
 | Ubuntu packages from the security pocket on all four machines: OpenSSH, sudo, kernel, libc, Slurm, munge, NFS, ufw, Ubuntu's `docker.io`, Java | unattended-upgrades (`auto_updates` role) | daily, installed without asking |
-| Tailscale (all four machines), Docker CE (skybot) | unattended-upgrades; their repositories are added as `Origins-Pattern` entries | daily, installed without asking |
+| Tailscale (all four machines), Docker CE (skybot), ntfy (gateway) | unattended-upgrades; their repositories are added as `Origins-Pattern` entries (ntfy also pinned above Ubuntu Pro's older build, [ADR-0009](decisions/0009-alerting-through-self-hosted-ntfy.md)) | daily, installed without asking |
 | Reboots that kernel and libc updates need, on the three nodes | `reboot-when-drained.timer` asks Slurm to reboot the node after its running jobs | weekly check (below) |
 | Reboots of the gateway | the owner | `make patch-status` shows when one is waiting |
 | GitHub Actions and the CI's Python tools in this repository | Dependabot ([`.github/dependabot.yml`](../.github/dependabot.yml)) | weekly pull requests; nothing changes until one is merged |
@@ -62,6 +62,12 @@ It changes nothing and prints, per machine: whether a reboot is waiting and
 for which packages, the running kernel and uptime, pending and held packages,
 the last unattended-upgrades run, the drained-reboot timer and the Tailscale
 version.
+
+The same facts are also metrics in Prometheus, from every machine's node
+exporter: `apt_upgrades_pending`, `apt_upgrades_held` and
+`node_reboot_required` (Ubuntu's apt collector), and
+`homelab_unattended_upgrades_last_run_seconds`. Alerts on them are the next
+step.
 
 ## In GitHub
 

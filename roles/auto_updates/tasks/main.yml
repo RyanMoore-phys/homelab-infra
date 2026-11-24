@@ -86,3 +86,55 @@
         - /etc/systemd/system/reboot-when-drained.service
         - /usr/local/sbin/reboot-when-drained
       notify: Reload systemd
+
+# Metric for the node exporter's textfile collector: when unattended-upgrades
+# last ran (Ubuntu's apt collector covers pending updates and reboots).
+- name: Write the patch metrics script
+  ansible.builtin.template:
+    src: homelab-patch-metrics.sh.j2
+    dest: /usr/local/sbin/homelab-patch-metrics
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Run it hourly
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/homelab-patch-metrics.{{ item.ext }}"
+    content: "{{ item.content }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - ext: service
+      content: |
+        # Managed by Ansible (auto_updates role).
+        [Unit]
+        Description=Publish when unattended-upgrades last ran
+
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/local/sbin/homelab-patch-metrics
+    - ext: timer
+      content: |
+        # Managed by Ansible (auto_updates role).
+        [Unit]
+        Description=Hourly patch metrics
+
+        [Timer]
+        OnActiveSec=1min
+        OnUnitActiveSec=1h
+
+        [Install]
+        WantedBy=timers.target
+  loop_control:
+    label: "{{ item.ext }}"
+  register: auto_updates_metric_units
+
+# In check mode the unit files are not written yet, so there is nothing to start.
+- name: Start the hourly patch metrics
+  ansible.builtin.systemd_service:
+    name: homelab-patch-metrics.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+  when: not ansible_check_mode or auto_updates_metric_units is not changed

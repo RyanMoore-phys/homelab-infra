@@ -8,11 +8,13 @@
     - authorized_keys
     - sudo_nopasswd
     - firewall
+    - node_exporter
 
 - name: Gateway between the lab and the home network
   hosts: router
   roles:
     - router
+    - ntfy
 
 - name: Shared storage
   hosts: nfs_server
@@ -23,3 +25,9 @@
   hosts: slurm_nodes
   roles:
     - slurm
+
+- name: What monitoring scrapes and alerts on, from the inventory
+  hosts: monitoring
+  roles:
+    - prometheus_targets
+    - alerting

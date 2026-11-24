@@ -99,13 +99,14 @@ of the gateway's Slurm ports was measured from every node (TCP connect).
 | gateway | 41641/udp | Tailscale WireGuard | n/a | n/a | via NAT traversal only |
 | gateway | 53 | dnsmasq | yes | yes | no |
 | gateway | 9100, 9835/tcp | node / GPU exporters | yes | yes | no |
-| gateway | 443, 8443/tcp | `tailscale serve`: wiki, Grafana (HTTPS) | no | yes | no |
+| gateway | 443, 8443, 8444/tcp | `tailscale serve`: wiki, Grafana, ntfy (HTTPS) | no | yes | no |
+| gateway | 2586/tcp | ntfy (deny-all; publishers use tokens, the owner a login) | **node1 only** (node2: refused) | yes: the subnet route reaches the lab address ahead of ufw; an anonymous read gets 403 | no |
 | gateway | 6818/tcp | slurmd | **Slurm controller only** | no | no |
 | gateway | 60001-60100/tcp | srun callbacks | not open (multi-node steps start on node0) | no | no |
 | gateway | 8765/tcp | the training project's control service (token required) | no | yes | no |
 | gateway | 111 | rpcbind (from the NFS client packages) | no | yes | no |
 | node0-2 | 22/tcp | OpenSSH (keys only) | yes | via gateway | no |
-| node0-2 | 9100/tcp | node_exporter | yes | via gateway | no |
+| node0-2 | 9100/tcp | node exporter (Ubuntu's package, lab address only); node1 also from its own Docker networks, for the Prometheus container | yes | via gateway | no |
 | node0-2 | 6818/tcp, 60001-60100/tcp | slurmd, srun callbacks | yes | via gateway | no |
 | node0-2 | 111 | rpcbind | yes (lab trust) | via gateway | no |
 | node0 | 2049/tcp | NFS v4.2 (named clients only) | yes | via gateway | no |
@@ -113,3 +114,4 @@ of the gateway's Slurm ports was measured from every node (TCP connect).
 | node0 | 6817/tcp | slurmctld | yes | via gateway | no |
 | node1 | 3000, 8080/tcp | Grafana, wiki (lab address) | yes | via gateway | no |
 | node1 | 9090/tcp | Prometheus | **localhost only** | no | no |
+| node1 | 9093/tcp | Alertmanager | **not published** (the monitoring Compose network only) | no | no |

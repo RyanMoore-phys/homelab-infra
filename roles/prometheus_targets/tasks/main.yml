@@ -1,0 +1,16 @@
+- name: Make the directory Prometheus includes
+  ansible.builtin.file:
+    path: "{{ prometheus_targets_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the scrape targets from the inventory
+  ansible.builtin.template:
+    src: homelab-scrape.yml.j2
+    dest: "{{ prometheus_targets_dir }}/homelab.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Check and reload Prometheus

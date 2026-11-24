@@ -35,15 +35,15 @@ flowchart TB
     end
     subgraph GW["gateway"]
         wan["wan_if · Wi-Fi<br/>DHCP address on the home network"]
-        tsif["tailscale0 · the way in<br/>subnet router for the lab<br/>tailscale serve :443 · :8443"]
+        tsif["tailscale0 · the way in<br/>subnet router for the lab<br/>tailscale serve :443 · :8443 · :8444"]
         nf["netfilter<br/>ts-input / ts-forward, then ufw<br/>default DROP for input and routed<br/>MASQUERADE out wan_if"]
-        svc["local services<br/>dnsmasq :53 · exporters :9100 · :9835<br/>slurmd :6818 · RTX 5050 · NFS client<br/>training + its control service :8765"]
+        svc["local services<br/>dnsmasq :53 · exporters :9100 · :9835 · ntfy :2586<br/>slurmd :6818 · RTX 5050 · NFS client<br/>training + its control service :8765"]
         lan["lan_if · Ethernet<br/>192.0.2.1/24 static"]
     end
     subgraph LAB[" "]
         sw{{"<b>Lab network · 192.0.2.0/24 · trusted</b><br/>Ethernet switch"}}
         n0["<b>node0</b> · .11<br/>NFS server · slurmctld · slurmd"]
-        n1["<b>node1</b> · .12<br/>Grafana · Prometheus · wiki<br/>2 Actions runners · slurmd"]
+        n1["<b>node1</b> · .12<br/>Grafana · Prometheus · Alertmanager · wiki<br/>2 Actions runners · slurmd"]
         n2["<b>node2</b> · .13<br/>slurmd"]
     end
 
@@ -97,12 +97,14 @@ flowchart TB
 
 | Host | Inventory groups | Services | Ansible roles |
 |---|---|---|---|
-| gateway | `router`, `slurm_nodes` | routing, NAT, dnsmasq, Tailscale subnet router + `tailscale serve`, node and GPU exporters, slurmd with the GPU, NFS client; the training project's real-time trainer and its control service (8765, tailnet only) | baseline + `router` + `slurm` |
-| node0 | `lab_nodes`, `nfs_server`, `slurm_nodes` | NFS v4.2 server, slurmctld, slurmd, node exporter (container); a game server unit, installed and stopped | baseline + `nfs_server` + `slurm` |
-| node1 | `lab_nodes`, `slurm_nodes` | Grafana, Prometheus, node exporter, the job board's collector and ingest (Docker Compose); a wiki behind Caddy (Docker Compose); Actions runners (one container per repository); slurmd, NFS client | baseline + `slurm` |
-| node2 | `lab_nodes`, `slurm_nodes` | slurmd, node exporter (container), NFS client | baseline + `slurm` |
+| gateway | `router`, `slurm_nodes` | routing, NAT, dnsmasq, Tailscale subnet router + `tailscale serve`, ntfy and the monitoring watchdog, node and GPU exporters, slurmd with the GPU, NFS client; the training project's real-time trainer and its control service (8765, tailnet only) | baseline + `router` + `ntfy` + `slurm` |
+| node0 | `lab_nodes`, `nfs_server`, `slurm_nodes` | NFS v4.2 server, slurmctld, slurmd, node exporter; a game server unit, installed and stopped | baseline + `nfs_server` + `slurm` |
+| node1 | `lab_nodes`, `slurm_nodes`, `monitoring` | Grafana, Prometheus, the job board's collector and ingest (Docker Compose); Alertmanager (its own Compose project, from `alerting`); a wiki behind Caddy (Docker Compose); Actions runners (one container per repository); node exporter, slurmd, NFS client | baseline + `slurm` + `prometheus_targets` + `alerting` |
+| node2 | `lab_nodes`, `slurm_nodes` | slurmd, node exporter, NFS client | baseline + `slurm` |
 
-*Baseline* = `auto_updates`, `ssh_hardening`, `authorized_keys`, `sudo_nopasswd` (nodes), `firewall`.
+*Baseline* = `auto_updates`, `ssh_hardening`, `authorized_keys`, `sudo_nopasswd` (nodes), `firewall`, `node_exporter`.
+The node exporter is Ubuntu's package on every machine, on its lab address
+(it replaced three hand-made exporters on 2026-11-23).
 Read from each machine on 2026-11-23 (`ss`, `docker ps`, `systemctl`). The
 Docker stacks, NFS client mounts, runners and game server are set up by hand,
 not by these roles.
@@ -190,18 +192,22 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    owner(["Owner browser · on the tailnet"])
-    serve["<b>gateway</b> · tailscale serve<br/>HTTPS :8443 · tailnet certificate"]
+    owner(["Owner · browser and phone<br/>on the tailnet"])
+    serve["<b>gateway</b> · tailscale serve<br/>HTTPS :8443 Grafana · :8444 ntfy<br/>tailnet certificates"]
     graf["<b>node1</b> · Grafana<br/>lab address :3000 · login required"]
-    prom["<b>node1</b> · Prometheus<br/>127.0.0.1:9090 · scrape every 10 s"]
+    prom["<b>node1</b> · Prometheus<br/>127.0.0.1:9090 · scrape every 10 s<br/>keeps 120 days · targets and rules from here"]
     db[("<b>node1</b> · SQLite job history<br/>in the ingest container")]
     cron["<b>node1</b> · cron, every 2 min<br/>slurm_board collect + push"]
     ctld["<b>node0</b> · slurmctld<br/>squeue · sinfo"]
-    ne_gw["<b>gateway</b><br/>node_exporter :9100"]
+    ne_gw["<b>gateway</b><br/>node exporter :9100<br/>+ certificate expiry"]
     gpu["<b>gateway</b><br/>NVIDIA GPU exporter :9835"]
-    ne1["<b>node1</b><br/>node-exporter container"]
-    ne0["<b>node0</b><br/>node-exporter container :9100"]
-    ne2["<b>node2</b><br/>node-exporter container :9100"]
+    ne1["<b>node1</b><br/>node exporter :9100<br/>+ Intel GPU"]
+    ne0["<b>node0</b><br/>node exporter :9100<br/>+ Slurm node states"]
+    ne2["<b>node2</b><br/>node exporter :9100"]
+    am["<b>node1</b> · Alertmanager<br/>no published port<br/>groups · repeats every 12 h"]
+    ntfy["<b>gateway</b> · ntfy<br/>lab address :2586 · deny-all<br/>tokens for publishers"]
+    wd["<b>gateway</b> · watchdog<br/>every 5 min: heartbeat in 15 min?"]
+    up["ntfy.sh<br/>iPhone wake-up only"]
 
     owner -->|"HTTPS"| serve
     serve -->|"HTTP over the lab"| graf
@@ -214,25 +220,61 @@ flowchart TB
     prom --> ne2
     cron -->|"merge"| db
     cron -->|"poll"| ctld
+    prom -->|"firing alerts · compose network"| am
+    am -->|"webhook + token · lab :2586<br/>alerts · heartbeat every 5 min"| ntfy
+    wd -->|"reads the heartbeat<br/>posts if it stops"| ntfy
+    serve -->|"HTTP on the lab address"| ntfy
+    ntfy -.->|"message ID only"| up
 
     classDef gw fill:#ffebee,stroke:#c62828,stroke-width:2px,color:#1a1a1a
     classDef svc fill:#e3f2fd,stroke:#1565c0,color:#1a1a1a
     classDef target fill:#e8f5e9,stroke:#2e7d32,color:#1a1a1a
     classDef actor fill:#ede7f6,stroke:#5e35b1,color:#1a1a1a
-    class serve gw
-    class graf,prom,db,cron svc
+    classDef ext fill:#eceff1,stroke:#607d8b,color:#1a1a1a
+    class serve,ntfy,wd gw
+    class graf,prom,db,cron,am svc
     class ne_gw,gpu,ne1,ne0,ne2,ctld target
     class owner actor
+    class up ext
     linkStyle default interpolate linear
     linkStyle 0 stroke:#5e35b1,stroke-width:2.5px,stroke-dasharray:6 4
-    linkStyle 1,2,3,9 stroke:#1565c0,stroke-width:2px
+    linkStyle 1,2,3,9,11 stroke:#1565c0,stroke-width:2px
     linkStyle 4,5,6,7,8,10 stroke:#2e7d32,stroke-width:1.5px
+    linkStyle 12,13,14 stroke:#c62828,stroke-width:2px
+    linkStyle 15 stroke:#607d8b,stroke-width:1.5px,stroke-dasharray:4 4
 ```
 
 Red: on the gateway. Blue: the monitoring stack on node1. Green: what it
 reads: scrape targets (pulled every 10 s over the lab) and the Slurm
 controller, polled every 2 minutes for the job board
-([slurm-dashboard.md](runbooks/slurm-dashboard.md)).
+([slurm-dashboard.md](runbooks/slurm-dashboard.md)). Grey: outside the lab.
+
+* **Alerts reach the phone through the gateway.** Prometheus evaluates the
+  rules from `roles/alerting` and hands firing alerts to Alertmanager. Alertmanager
+  posts them to ntfy on the gateway, and the phone reads them there through
+  `tailscale serve`. ntfy.sh only gets a message ID, to wake the iPhone app
+  ([alerting runbook](runbooks/alerting.md),
+  [ADR-0009](decisions/0009-alerting-through-self-hosted-ntfy.md)).
+* **The gateway watches the monitoring.** One alert always fires and arrives
+  as a heartbeat every 5 minutes. If none has arrived in 15 minutes, the
+  gateway posts "Monitoring is down" itself, because node1 cannot report its
+  own failure.
+
+* **Every machine runs Ubuntu's packaged node exporter** on its lab address
+  (`node_exporter` role). Besides the machine's own metrics it publishes small
+  `.prom` files written by the roles. On every machine: pending and held
+  updates, and whether a reboot is waiting (Ubuntu's apt collector), plus when
+  unattended-upgrades last ran. On the Slurm controller: each node's state.
+  On the gateway: when its tailnet certificates expire.
+* **What Prometheus scrapes comes from the inventory.** The
+  `prometheus_targets` role writes the target list on node1, and Prometheus
+  includes it with `scrape_config_files`. Each target is named after its
+  machine (`main:9100`), and a machine added to the inventory is scraped
+  after the next deploy.
+* **node1 scrapes itself from its Docker bridge.** Prometheus runs in a
+  container, so a scrape of node1's own exporter does not come from the lab
+  address; node1's firewall admits 9100 from Docker's networks, which no other
+  machine can send from.
 
 Prometheus has no authentication, so it listens on localhost only; Grafana
 reaches it over the Compose network. Docker-published ports bypass ufw, so

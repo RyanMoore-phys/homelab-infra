@@ -18,15 +18,20 @@ all:
           lab_ip: 192.0.2.1
           lan_if: eth1
           wan_if: wlan0
+          gpu_exporter_port: 9835       # adds a "gpu" scrape target for this host
+          node_exporter_retire_units: [node_exporter]   # a hand-installed exporter to replace
           router_tailscale_serve:       # lab web services published on the tailnet
             - {https_port: 443, target: "http://192.0.2.12:8080"}    # wiki
             - {https_port: 8443, target: "http://192.0.2.12:3000"}   # Grafana
+            - {https_port: 8444, target: "http://192.0.2.1:2586"}    # ntfy (alerts to the phone), on this host
           firewall_rules:
             - {port: "22", proto: tcp, from: "192.0.2.0/24", interface: eth1}
             - {port: "53", from: "192.0.2.0/24", interface: eth1}
             - {port: "9100", proto: tcp, from: "192.0.2.0/24", interface: eth1}
             # ADR-0007: the gateway is also a Slurm node; only the controller may reach its slurmd
             - {port: "6818", proto: tcp, from: "192.0.2.11", interface: eth1, comment: "slurmd from the controller (ADR-0007)"}
+            # Alertmanager (on the monitoring host) publishes to ntfy here
+            - {port: "2586", proto: tcp, from: "192.0.2.12", interface: eth1, comment: "Alertmanager on node1 to ntfy"}
           # ADR-0007: Slurm compute node, uncapped, 2 GB held back for routing, its GPU schedulable
           slurm_cpus: 12
           slurm_cores_per_socket: 6
@@ -68,7 +73,14 @@ all:
         # bridge address, not the lab address: also accept the host's Docker networks
         # there (Docker's default pool). Off that host no TCP handshake can complete
         # from them. 198.51.100.0/24 stands in for that range here.
-        node1: {lab_ip: 192.0.2.12, lan_if: eth0, ci_runner_from: ["192.0.2.12", "198.51.100.0/24"]}
+        node1:
+          lab_ip: 192.0.2.12
+          lan_if: eth0
+          ci_runner_from: ["192.0.2.12", "198.51.100.0/24"]
+          # Prometheus runs in a container here: scraping this host's own exporter it
+          # arrives from the Docker bridge, so admit 9100 from Docker's networks too
+          firewall_rules:
+            - {port: "9100", proto: tcp, from: "198.51.100.0/24", comment: "Prometheus container scrapes the local exporter"}
         node2:
           lab_ip: 192.0.2.13
           lan_if: eth0
@@ -76,6 +88,12 @@ all:
           firewall_rules_absent:
             - "allow 69/udp"
             - "allow from 192.0.2.0/24 to any port 111"
+          # Exporter containers set up by hand, replaced by the packaged exporter
+          node_exporter_retire_containers: [node-exporter]
+    monitoring:
+      # Runs Prometheus; receives the scrape targets generated from this inventory
+      hosts:
+        node1: {}
     nfs_server:
       hosts:
         node0:

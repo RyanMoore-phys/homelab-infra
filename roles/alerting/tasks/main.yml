@@ -1,0 +1,77 @@
+- name: Make the rules and Alertmanager directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ alerting_rules_dir }}"
+    - "{{ alerting_alertmanager_dir }}"
+
+# The rules live in this repository with unit tests (make rules); Prometheus
+# includes this directory, checks it and reloads (prometheus_targets handler).
+- name: Deploy the alert rules
+  ansible.builtin.copy:
+    src: rules/homelab.yml
+    dest: "{{ alerting_rules_dir }}/homelab.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Check and reload Prometheus
+
+# Alertmanager publishes to ntfy with the token the gateway created for it.
+# It goes from the gateway's root-only file to a file only the container's
+# user can read, without being logged.
+- name: Read Alertmanager's ntfy token on the gateway
+  ansible.builtin.slurp:
+    src: /etc/ntfy/alertmanager.token
+  delegate_to: "{{ alerting_ntfy_host }}"
+  register: alerting_token
+  failed_when: false
+  no_log: true
+
+- name: Give it to Alertmanager (readable only by the container's user)
+  ansible.builtin.copy:
+    dest: "{{ alerting_alertmanager_dir }}/ntfy_token"
+    content: "{{ alerting_token.content | b64decode }}"
+    owner: "65534"
+    group: "65534"
+    mode: "0400"
+  when: alerting_token.content is defined
+  no_log: true
+  notify: Reload Alertmanager
+
+- name: Write Alertmanager's configuration
+  ansible.builtin.template:
+    src: alertmanager.yml.j2
+    dest: "{{ alerting_alertmanager_dir }}/alertmanager.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload Alertmanager
+
+- name: Write Alertmanager's compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ alerting_alertmanager_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Check the configuration with amtool before it is used
+  ansible.builtin.command:
+    cmd: >-
+      docker run --rm --entrypoint amtool
+      -v {{ alerting_alertmanager_dir }}/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      {{ alerting_alertmanager_image }} check-config /etc/alertmanager/alertmanager.yml
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Start Alertmanager (and recreate it when its compose file changes)
+  ansible.builtin.command:
+    cmd: docker compose up -d
+    chdir: "{{ alerting_alertmanager_dir }}"
+  register: alerting_up
+  changed_when: alerting_up.stderr is search('Created|Recreated|Started')
+  when: not ansible_check_mode

@@ -1,0 +1,311 @@
+# 1. ntfy's apt repository, trusted only after its key's fingerprint matches
+#    the one pinned in defaults.
+- name: Make the apt keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Fetch ntfy's signing key
+  ansible.builtin.get_url:
+    url: "{{ ntfy_key_url }}"
+    dest: /etc/apt/keyrings/ntfy.gpg
+    checksum: "sha256:{{ ntfy_key_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: ntfy_key
+
+- name: Read the key's fingerprint
+  ansible.builtin.command: gpg --show-keys --with-colons /etc/apt/keyrings/ntfy.gpg
+  register: ntfy_key_info
+  changed_when: false
+  check_mode: false
+  when: not (ansible_check_mode and ntfy_key is changed)
+
+- name: Trust it only if it is ntfy's key
+  ansible.builtin.assert:
+    that: ("fpr:::::::::" ~ ntfy_key_fingerprint ~ ":") in ntfy_key_info.stdout
+    fail_msg: "/etc/apt/keyrings/ntfy.gpg is not the pinned ntfy key; not adding the repository"
+    quiet: true
+  when: ntfy_key_info is not skipped
+
+- name: Add ntfy's apt repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/ntfy.list
+    content: "deb [arch=amd64 signed-by=/etc/apt/keyrings/ntfy.gpg] {{ ntfy_apt_url }} stable main\n"
+    owner: root
+    group: root
+    mode: "0644"
+  register: ntfy_repo
+
+# Ubuntu Pro's ESM source is pinned at 510, above every normal source, and
+# carries an older ntfy; without this pin apt installs that one.
+- name: Prefer ntfy's own repository for the ntfy package
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/ntfy
+    content: |
+      # Managed by Ansible (ntfy role).
+      Package: ntfy
+      Pin: origin {{ ntfy_apt_url | urlsplit('hostname') }}
+      Pin-Priority: 600
+    owner: root
+    group: root
+    mode: "0644"
+  register: ntfy_pin
+
+# The account and directories come before the package: its install script
+# makes the same account if missing, but takes ownership of the directories
+# only, not the databases inside them.
+- name: Make ntfy's service group
+  ansible.builtin.group:
+    name: "{{ ntfy_user }}"
+    system: true
+  register: ntfy_group
+
+- name: Make ntfy's service account
+  ansible.builtin.user:
+    name: "{{ ntfy_user }}"
+    group: "{{ ntfy_user }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+  register: ntfy_account
+
+# 0700 is what ntfy's package sets on every upgrade.
+- name: Make ntfy's data and cache directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ ntfy_user }}"
+    group: "{{ ntfy_user }}"
+    mode: "0700"
+  loop:
+    - /var/lib/ntfy
+    - /var/cache/ntfy
+    - /var/cache/ntfy/attachments
+  when: not (ansible_check_mode and (ntfy_group is changed or ntfy_account is changed))
+
+- name: Give ntfy the databases already there
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    recurse: true
+    owner: "{{ ntfy_user }}"
+    group: "{{ ntfy_user }}"
+  loop:
+    - /var/lib/ntfy
+    - /var/cache/ntfy
+  when: not (ansible_check_mode and (ntfy_group is changed or ntfy_account is changed))
+
+- name: Read the installed packages
+  ansible.builtin.package_facts:
+
+# A distribution build (its version names the distribution) is replaced once;
+# later releases come from unattended-upgrades, which allows ntfy's origin.
+# In check mode a new repository or pin is not applied yet, so this waits.
+- name: Install ntfy from ntfy's repository
+  ansible.builtin.apt:
+    name: ntfy
+    state: "{{ 'latest' if ntfy_installed is search('ubuntu|debian') else 'present' }}"
+    update_cache: "{{ ntfy_repo is changed or ntfy_pin is changed }}"
+  vars:
+    ntfy_installed: "{{ ansible_facts.packages.ntfy | default([]) | map(attribute='version') | join(' ') }}"
+  when: not (ansible_check_mode and (ntfy_repo is changed or ntfy_pin is changed))
+  register: ntfy_install
+
+- name: Read the installed ntfy version
+  ansible.builtin.package_facts:
+
+- name: Check that ntfy is a version whose alert template was tested
+  ansible.builtin.assert:
+    that: ansible_facts.packages.ntfy[0].version is version(ntfy_min_version, '>=')
+    fail_msg: >-
+      ntfy {{ ansible_facts.packages.ntfy[0].version }} is older than {{ ntfy_min_version }}:
+      alerts would reach the phone as raw JSON. Check apt-cache policy ntfy.
+    quiet: true
+  # In check mode a pending install or upgrade has not happened yet.
+  when:
+    - "'ntfy' in ansible_facts.packages"
+    - not (ansible_check_mode and (ntfy_install is skipped or ntfy_install is changed))
+
+# 2. Configuration. The base URL is the gateway's own tailnet name, read now,
+#    so it is never stored in the repository or the inventory.
+- name: Read the gateway's tailnet name
+  ansible.builtin.command: tailscale status --json
+  register: ntfy_tailscale
+  changed_when: false
+  check_mode: false
+
+- name: Set ntfy's base URL from it
+  ansible.builtin.set_fact:
+    ntfy_base_url: "https://{{ (ntfy_tailscale.stdout | from_json).Self.DNSName | regex_replace('\\.$', '') }}:{{ ntfy_https_port }}"
+  no_log: true
+
+- name: Write ntfy's configuration
+  ansible.builtin.template:
+    src: server.yml.j2
+    dest: /etc/ntfy/server.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart ntfy
+  when: not (ansible_check_mode and ntfy_repo is changed)
+
+- name: Keep ntfy running
+  ansible.builtin.systemd_service:
+    name: ntfy
+    state: started
+    enabled: true
+  when: not ansible_check_mode
+
+- name: Apply a changed configuration before the accounts are set up
+  ansible.builtin.meta: flush_handlers
+
+# 3. Service accounts. The ntfy CLI runs as ntfy's own account, so the database
+#    files it touches stay the server's. Each account gets a random password
+#    that is never stored: they authenticate with tokens.
+- name: See whether ntfy is installed yet
+  ansible.builtin.stat:
+    path: /usr/bin/ntfy
+  register: ntfy_binary
+
+# In check mode a new service account does not exist yet to run the CLI as.
+- name: Set up the service accounts
+  when:
+    - ntfy_binary.stat.exists
+    - not (ansible_check_mode and ntfy_account is changed)
+  block:
+    - name: List ntfy's accounts
+      ansible.builtin.command: ntfy user list
+      become: true
+      become_user: "{{ ntfy_user }}"
+      register: ntfy_users
+      changed_when: false
+      check_mode: false
+
+    - name: Create the missing accounts
+      ansible.builtin.command: "ntfy user add {{ item.name }}"
+      become: true
+      become_user: "{{ ntfy_user }}"
+      environment:
+        NTFY_PASSWORD: "{{ lookup('ansible.builtin.password', '/dev/null', length=40, chars=['ascii_letters', 'digits']) }}"
+      loop: "{{ ntfy_service_users }}"
+      loop_control:
+        label: "{{ item.name }}"
+      # The ntfy CLI writes its output to stderr.
+      when: (ntfy_users.stdout ~ ntfy_users.stderr) is not search('user ' ~ item.name ~ ' ')
+      changed_when: true
+      no_log: true
+
+    # Granting the same access twice changes nothing, so this runs every time.
+    - name: Grant each account its topics
+      ansible.builtin.command: "ntfy access {{ item.0.name }} {{ item.1.topic }} {{ item.1.permission }}"
+      become: true
+      become_user: "{{ ntfy_user }}"
+      loop: "{{ ntfy_service_users | subelements('access') }}"
+      loop_control:
+        label: "{{ item.0.name }}: {{ item.1.permission }} {{ item.1.topic }}"
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Look for each account's token
+      ansible.builtin.stat:
+        path: "/etc/ntfy/{{ item.name }}.token"
+      loop: "{{ ntfy_service_users }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: ntfy_token_files
+
+    # A token that was created but never saved (an interrupted run) is useless
+    # to everyone; remove it before making the one that will be kept.
+    - name: Remove unsaved tokens of each account that has no saved token
+      ansible.builtin.shell: |
+        set -o pipefail
+        ntfy token list {{ item.item.name }} 2>&1 | grep -o 'tk_[A-Za-z0-9]*' | while read -r t; do
+          ntfy token remove {{ item.item.name }} "$t" >/dev/null 2>&1
+        done
+      args:
+        executable: /bin/bash
+      become: true
+      become_user: "{{ ntfy_user }}"
+      loop: "{{ ntfy_token_files.results | rejectattr('stat.exists') | list }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      changed_when: true
+      no_log: true
+
+    - name: Create a token for each account that has none
+      ansible.builtin.command: "ntfy token add {{ item.item.name }}"
+      become: true
+      become_user: "{{ ntfy_user }}"
+      loop: "{{ ntfy_token_files.results | rejectattr('stat.exists') | list }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      register: ntfy_new_tokens
+      changed_when: true
+      no_log: true
+
+    - name: Keep each new token root-only on the gateway
+      ansible.builtin.copy:
+        dest: "/etc/ntfy/{{ item.item.item.name }}.token"
+        content: "{{ (item.stdout ~ item.stderr) | regex_search('tk_[A-Za-z0-9]+') }}\n"
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ ntfy_new_tokens.results | default([]) }}"
+      no_log: true
+
+# 4. The watchdog: reports on the alert topic when the heartbeat stops.
+- name: Write the watchdog
+  ansible.builtin.template:
+    src: homelab-watchdog.sh.j2
+    dest: /usr/local/sbin/homelab-watchdog
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Run it every 5 minutes, starting 15 minutes after it is enabled
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/homelab-watchdog.{{ item.ext }}"
+    content: "{{ item.content }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - ext: service
+      content: |
+        # Managed by Ansible (ntfy role).
+        [Unit]
+        Description=Report on the phone when the monitoring heartbeat stops
+        After=ntfy.service
+
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/local/sbin/homelab-watchdog
+    - ext: timer
+      content: |
+        # Managed by Ansible (ntfy role).
+        [Unit]
+        Description=Monitoring heartbeat check, every 5 minutes
+
+        [Timer]
+        OnActiveSec=15min
+        OnUnitActiveSec=5min
+
+        [Install]
+        WantedBy=timers.target
+  loop_control:
+    label: "{{ item.ext }}"
+  register: ntfy_watchdog_units
+
+# In check mode the unit files are not written yet, so there is nothing to start.
+- name: Start the watchdog
+  ansible.builtin.systemd_service:
+    name: homelab-watchdog.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+  when: not ansible_check_mode or ntfy_watchdog_units is not changed

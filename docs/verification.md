@@ -58,6 +58,31 @@ and 30 days of root logins) and the GitHub API.
 | Retired firewall rules | NFS readable on all three clients; a three-node `srun`; 5/5 Prometheus targets up; Grafana healthy | node0 12, node1 12, node2 17 rules gone; each node now holds only tailnet, SSH, lab trust and 41641/udp | pass |
 | Code matches the machines | check mode, all hosts | | `changed=0` on 4/4 |
 
+### Monitoring: one exporter per machine, 2026-11-23
+
+| Control | Test | Result |
+|---|---|---|
+| Ubuntu's node exporter on every machine | `systemctl is-active prometheus-node-exporter` and the listening address | active on 4/4, lab address only; the gateway's hand-installed exporter and the containers on node0 and node2 are gone (`sudo docker ps`) |
+| Targets come from the inventory | Prometheus' target list | 5/5 up: `main:9100`, `node1:9100`, `node2:9100`, `skybot:9100`, `main:9835` |
+| The configuration is valid before it is used | `promtool check config` on the new `prometheus.yml` with the generated file, in the same image, before the swap; `docker compose ... up --dry-run` | valid; only `prometheus` and `gpu-metrics` recreated, the old exporter removed |
+| Status metrics are well-formed | each script run on its machine, its output piped to `promtool check metrics` | no problems on 3/3 |
+| Status metrics arrive | Prometheus query per metric | apt and reboot metrics and the last unattended run on 4/4; Slurm states from node0; certificate expiry from the gateway (2027-02-20); node1's Intel GPU through the new exporter |
+| History kept, retention restored | `count_over_time` on the old node1 series; Prometheus' flags | 2,154 old samples in the last 6 h still readable; retention 120 d, 20 GiB |
+| node1 scrapes itself | the `node1:9100` target | down until node1's firewall admitted 9100 from its Docker networks (the container's scrape arrives from the bridge); up after |
+
+### Alerting, 2026-11-23/24
+
+| Control | Test | Result |
+|---|---|---|
+| Rules fire when they should and stay quiet otherwise | `make rules`: `promtool test rules`, synthetic series for every rule (in CI) | 13/13 pass |
+| Routing | `amtool config routes test` for Watchdog, a critical and a warning alert | `heartbeat`, `phone-urgent`, `phone` |
+| ntfy refuses strangers | anonymous read of the alert topic, from the tailnet; ntfy's lab port from node2 | 403; refused (node1 only) |
+| A machine stops answering | node2's exporter stopped 23:41:58, started 00:00:24 UTC | ExporterDown fired 23:47:04, at ntfy 23:47:32; Resolved 00:02:32; 0 failed deliveries. **Found:** the text was raw JSON, because Ubuntu Pro's ntfy 2.11 had been installed ([ADR-0009](decisions/0009-alerting-through-self-hosted-ntfy.md)) |
+| Monitoring itself stops | Alertmanager on node1 stopped 02:51:49 UTC (a timer would have restarted it at 03:16), started 03:04:54 | "Monitoring is down" 03:01:15, 15 min after the last heartbeat; first heartbeat back 03:06:02; "Monitoring is back" 03:06:15; both seen on the phone |
+| ntfy's own build after the fix | `apt-cache policy ntfy`; `ps`; `ntfy user list`, `ntfy token list` | 2.38.1 from ntfy's repository, running as `ntfy`; the three logins and one token per service account kept; user database migrated (schema 6 → 11); databases backed up first to `/var/backups/ntfy-20261124/` |
+| A machine stops answering, after the fix | node2's exporter stopped 03:08:29, started 03:14:58 UTC | ExporterDown at ntfy 03:14:32 as "🚨 Alert: ExporterDown" with instance, severity, summary and description on their own lines; "✅ Resolved: ExporterDown" 03:19:32; 0 failed deliveries |
+| Drift after the fix | check mode, all four machines | `changed=0` on 4/4 |
+
 ## Access
 
 | Control | Allowed path (must work) | Refused path (must fail) | Result |

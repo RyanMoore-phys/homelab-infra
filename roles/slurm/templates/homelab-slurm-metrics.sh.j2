@@ -1,0 +1,40 @@
+#!/bin/sh
+# Managed by Ansible (slurm role). Run every minute on the controller by
+# homelab-slurm-metrics.timer. Publishes each node's Slurm state for the node
+# exporter's textfile collector, so alerts can see a node down or stuck
+# draining.
+set -eu
+dir="{{ node_exporter_textfile_dir }}"
+[ -d "$dir" ] || exit 0
+
+# One line per node: name|state|time of the reason it is unavailable ("Unknown" when none).
+nodes=$(sinfo -h -N -o '%N|%T|%H' | sort -u)
+
+tmp=$(mktemp "$dir/.homelab_slurm.XXXXXX")
+{
+  echo "# HELP homelab_slurm_node_state Slurm's state for each node (one series per node, value 1)."
+  echo "# TYPE homelab_slurm_node_state gauge"
+  echo "$nodes" | while IFS='|' read -r node state since; do
+    [ -n "$node" ] || continue
+    printf 'homelab_slurm_node_state{node="%s",state="%s"} 1\n' "$node" "$(printf '%s' "$state" | tr -d '*~#!%$@^-')"
+  done
+
+  echo "# HELP homelab_slurm_node_responding Whether the controller hears from the node (0 when Slurm marks it with *)."
+  echo "# TYPE homelab_slurm_node_responding gauge"
+  echo "$nodes" | while IFS='|' read -r node state since; do
+    [ -n "$node" ] || continue
+    case "$state" in *'*') r=0 ;; *) r=1 ;; esac
+    printf 'homelab_slurm_node_responding{node="%s"} %s\n' "$node" "$r"
+  done
+
+  echo "# HELP homelab_slurm_node_unavailable_since_seconds When the node was drained or taken down (Unix time; 0: available)."
+  echo "# TYPE homelab_slurm_node_unavailable_since_seconds gauge"
+  echo "$nodes" | while IFS='|' read -r node state since; do
+    [ -n "$node" ] || continue
+    ts=0
+    [ "$since" = "Unknown" ] || ts=$(date -d "$since" +%s 2>/dev/null || echo 0)
+    printf 'homelab_slurm_node_unavailable_since_seconds{node="%s"} %s\n' "$node" "$ts"
+  done
+} > "$tmp"
+chmod 0644 "$tmp"
+mv "$tmp" "$dir/homelab_slurm.prom"

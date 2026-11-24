@@ -9,10 +9,11 @@
 Infrastructure as code for a four-machine Ubuntu homelab: a Linux gateway
 that routes and segments a private lab network, a four-node Slurm cluster
 (the three lab nodes plus the gateway's CPUs and GPU)
-with shared NFS storage, and a monitoring stack, with **nothing forwarded in
-from the internet**. The host configuration (SSH, keys, sudo, firewall,
-routing, NFS exports, Slurm, patching) is idempotent Ansible roles, checked by
-CI on every push and deployed through a gated, owner-approved pipeline. What
+with shared NFS storage, and a monitoring stack that sends alerts to the
+owner's phone, with **nothing forwarded in from the internet**. The host
+configuration (SSH, keys, sudo, firewall, routing, NFS exports, Slurm,
+patching, metrics, alerting) is idempotent Ansible roles, checked by CI on
+every push and deployed through a gated, owner-approved pipeline. What
 is still set up by hand is listed under [Maintenance](#maintenance).
 
 This repository is public, so it is built to hold **no addresses, keys,
@@ -66,9 +67,9 @@ flowchart TB
 
 | Machine | Role |
 |---|---|
-| **gateway** | A dedicated machine between the home network and the lab: routing, NAT, dnsmasq, default-deny firewall, lab→home block, the Tailscale subnet router every remote session goes through, HTTPS for lab web UIs, and a Slurm compute node with 12 CPUs and the lab's only GPU ([ADR-0007](docs/decisions/0007-gateway-joins-slurm.md)). It is also the training project's host, which runs real-time training outside Slurm |
+| **gateway** | A dedicated machine between the home network and the lab: routing, NAT, dnsmasq, default-deny firewall, lab→home block, the Tailscale subnet router every remote session goes through, HTTPS for lab web UIs, the ntfy server that delivers alerts to the owner's phone ([ADR-0009](docs/decisions/0009-alerting-through-self-hosted-ntfy.md)), and a Slurm compute node with 12 CPUs and the lab's only GPU ([ADR-0007](docs/decisions/0007-gateway-joins-slurm.md)). It is also the training project's host, which runs real-time training outside Slurm |
 | **node0** | NFS v4.2 server for shared simulation data (`/srv/openmc`), Slurm controller, compute. A game server unit is installed but stopped |
-| **node1** | Grafana + Prometheus and a wiki behind Caddy (Docker Compose), Slurm job board, two self-hosted Actions runners (one per repository), compute |
+| **node1** | Grafana, Prometheus and Alertmanager, and a wiki behind Caddy (Docker Compose), Slurm job board, two self-hosted Actions runners (one per repository), compute |
 | **node2** | Compute |
 
 Every machine runs Tailscale, but remote traffic is directed **through the gateway first**: SSH, Ansible, monitoring and the web UIs all reach the nodes by their lab address over its subnet route. Each node's own tailnet address is kept only as a fallback for when the gateway is down.
@@ -87,6 +88,7 @@ Deeper: [architecture](docs/architecture.md) · [network, packet path and port m
 | Services | Prometheus on `127.0.0.1`; Grafana and the wiki on node1's lab address, published on the tailnet by the gateway over HTTPS | Prometheus refused from the network; Grafana healthy through the gateway |
 | Storage | NFS exports list each client (three, including the gateway), `root_squash` | exports reviewed; role refuses wildcard exports |
 | Patching | Unattended upgrades everywhere, including Tailscale and Docker CE; nodes reboot through Slurm after their running jobs when an update needs it; Dependabot for actions, tools and monitoring images ([patching](docs/patching.md), [ADR-0008](docs/decisions/0008-unattended-patching-and-drained-reboots.md)) | `make patch-status`; reboot script tested on every Slurm state |
+| Detection | Alert rules in the repository, each with a unit test; alerts go to a self-hosted ntfy on the gateway, deny-all, publishing by token; a watchdog on the gateway reports when the monitoring itself goes quiet ([alerting](docs/runbooks/alerting.md), [ADR-0009](docs/decisions/0009-alerting-through-self-hosted-ntfy.md)) | `promtool` tests in CI; a stopped exporter and a stopped Alertmanager each reached the phone and cleared (2026-11-23/24); anonymous reads of ntfy refused |
 | Supply chain | Actions pinned to commit SHAs; Python, Ansible, linters, collections pinned; Dependabot | CI |
 | Public repo | Private-data guard, gitleaks on full history, workflow guard, masked deploy logs | guards tested with planted leaks |
 
@@ -155,6 +157,26 @@ Problems found during the hardening, and what they taught:
     the lab's own address range, a laptop's local route wins over Tailscale's
     subnet route and the nodes time out. Jumping through the gateway by its
     tailnet name still works; renumbering the lab is on the roadmap.
+13. **Configuration nobody reads looks exactly like configuration that works.**
+    `group_vars/all.yml` sat at the repository root, where Ansible never loads
+    it; it seemed fine only because a role's defaults held the same values. On
+    node1, the monitoring stack's live files had drifted from the repository:
+    Prometheus kept 15 days instead of 120, and the dashboards' filters matched
+    no series. Both surfaced only when a new setting was expected to arrive and
+    did not. ([verification](docs/verification.md#monitoring-one-exporter-per-machine-2026-11-23))
+14. **Test the version that is installed.** The first live alert reached the
+    phone as raw JSON. ntfy's `alertmanager` template had been tried in ntfy's
+    own 2.38.1 image, but apt had installed Ubuntu Pro's 2.11 build, which has
+    no such template: Ubuntu Pro's sources outrank every other repository. The
+    role now pins ntfy's repository for that one package and checks the
+    installed version against the one that was tested.
+    ([ADR-0009](docs/decisions/0009-alerting-through-self-hosted-ntfy.md))
+15. **The monitoring needs a monitor.** A silent pipeline and a healthy lab
+    look the same on a phone. Prometheus keeps one alert always firing as a
+    heartbeat, and the gateway, a different machine from the monitoring host,
+    says so when the heartbeat stops. Its first message came before anyone
+    tested it: the heartbeat had not been wired up yet.
+    ([alerting](docs/runbooks/alerting.md))
 
 Full log: [hardening log](docs/security/hardening-log.md). Decisions and their trade-offs: [ADRs](docs/decisions/README.md).
 Incidents, written up blameless with timelines from the records: [postmortems](docs/postmortems/README.md)
@@ -164,7 +186,7 @@ Incidents, written up blameless with timelines from the records: [postmortems](d
 
 ```mermaid
 flowchart LR
-    pr(["push / pull request<br/>forks included"]) --> ci["<b>ci</b> · GitHub-hosted runner<br/>gitleaks · private-data guard · workflow guard<br/>shellcheck · yamllint · ansible-lint · syntax"]
+    pr(["push / pull request<br/>forks included"]) --> ci["<b>ci</b> · GitHub-hosted runner<br/>gitleaks · private-data guard · workflow guard<br/>shellcheck · yamllint · ansible-lint · syntax<br/>alert rule tests (promtool)"]
     owner(["owner"]) -->|"Run workflow on main"| gate{"environment<br/>approval"}
     gate -->|"approved"| deploy["<b>deploy</b> · self-hosted runner in the lab<br/>check by default · apply on request<br/>masked output · recap only"]
     deploy -->|"SSH · pinned host keys"| lab[("lab hosts")]
@@ -198,7 +220,8 @@ What runs by itself, and what is a person's job. Details and trade-offs:
 
 | When | What | How |
 |---|---|---|
-| Daily, automatic | Security updates on all four machines, plus Tailscale and Docker CE from their own repositories | unattended-upgrades (`auto_updates` role) |
+| Continuous, automatic | Alerts on machines down, disks filling, overdue reboots, stuck updates, Slurm nodes, NFS mounts, certificates and GPU heat reach the owner's phone; the gateway checks every 5 minutes that the monitoring itself is alive | Prometheus rules → Alertmanager → ntfy; what each alert means and what to do: [alerting runbook](docs/runbooks/alerting.md) |
+| Daily, automatic | Security updates on all four machines, plus Tailscale, Docker CE and ntfy from their own repositories | unattended-upgrades (`auto_updates` role) |
 | Weekly, automatic | A node whose update needs a reboot is drained, rebooted after its running jobs and returned to service; a node someone drained on purpose is left alone | `reboot-when-drained.timer` → `scontrol reboot ASAP nextstate=RESUME` |
 | Weekly, review | Dependabot pull requests: the pinned actions and CI tools here; the monitoring images in the training project's repository (patch and minor only) | merge; for monitoring images, `docker compose pull && docker compose up -d` on node1 |
 | Any time | What each machine still needs: a waiting reboot, pending and held updates, the last unattended run | `make patch-status` (read-only) |
@@ -206,7 +229,8 @@ What runs by itself, and what is a person's job. Details and trade-offs:
 | By hand | Gateway reboots (it routes the lab and runs training outside Slurm); non-security updates (`apt upgrade`; 24 to 35 waiting per machine on 2026-11-23); the held NVIDIA and Kubernetes packages | owner |
 
 Not managed by Ansible yet, so set up and updated by hand: the Docker Compose
-stacks (monitoring and the wiki on node1, the exporters on node0 and node2),
+stacks (monitoring and the wiki on node1; Prometheus's targets and alert
+rules and Alertmanager, though, are deployed from here),
 the NFS client mounts, the two runner containers, the game server, and the
 munge key (on purpose: it is a secret, copied node to node).
 
@@ -233,29 +257,33 @@ up without it. `make help` lists every target.
 ```text
 .
 ├── playbooks/
-│   ├── site.yml                # baseline for all hosts, then router / NFS / Slurm plays
-│   └── patch-status.yml        # read-only report: reboots, pending and held updates
+│   ├── site.yml                # baseline for all hosts, then router / NFS / Slurm / monitoring plays
+│   ├── patch-status.yml        # read-only report: reboots, pending and held updates
+│   └── group_vars/all.yml      # shared defaults, nothing identifying
 ├── roles/
-│   ├── auto_updates/           # unattended upgrades (incl. Tailscale, Docker CE), drained reboots
+│   ├── auto_updates/           # unattended upgrades (incl. Tailscale, Docker CE), drained reboots, patch metric
 │   ├── ssh_hardening/          # sshd drop-in, validated with `sshd -t` before install
-│   ├── authorized_keys/        # keys with from= source pinning
+│   ├── authorized_keys/        # exclusive key files with from= source pinning
 │   ├── sudo_nopasswd/          # unattended sudo for the automation account, visudo-checked
-│   ├── firewall/               # ufw defaults, tailnet, lab trust, host rules
-│   ├── router/                 # forwarding, NAT, lab→home block, dnsmasq
+│   ├── firewall/               # ufw defaults, tailnet, lab trust, host rules, retired rules
+│   ├── node_exporter/          # Ubuntu's node exporter on the lab address, textfile collectors
+│   ├── router/                 # forwarding, NAT (own nftables table), lab→home block, dnsmasq, cert metric
 │   ├── nfs_server/             # per-share exports, refuses wildcard clients
-│   └── slurm/                  # slurm.conf, cgroup.conf, gres.conf (GPU) from inventory
+│   ├── slurm/                  # slurm.conf, cgroup.conf, gres.conf (GPU) from inventory, node-state metric
+│   ├── ntfy/                   # push server on the gateway: pinned repo, deny-all, tokens, monitoring watchdog
+│   ├── prometheus_targets/     # scrape targets generated from the inventory
+│   └── alerting/               # Alertmanager on node1, alert rules and their promtool tests
 ├── inventory/hosts.example.yml # shape of the private inventory (RFC 5737 addresses)
-├── group_vars/all.yml          # shared defaults, nothing identifying
 ├── scripts/                    # check-private-data.sh, check-workflows.sh
 ├── runner/                     # self-hosted runner: compose file, job-started hook, start script
 ├── docs/
 │   ├── architecture.md · network.md · cicd.md · patching.md · verification.md
 │   ├── security/               # threat model, access model, hardening log
 │   ├── postmortems/            # PM-001 … 004, blameless incident write-ups
-│   ├── decisions/              # ADR-0001 … 0008
-│   └── runbooks/               # runner, router failover, Slurm, gateway in Slurm, job board, rollback
+│   ├── decisions/              # ADR-0001 … 0009
+│   └── runbooks/               # alerting, runner, router failover, Slurm, gateway in Slurm, job board, rollback
 ├── .github/workflows/          # ci.yml (hosted) · deploy.yml (self-hosted, gated)
-└── Makefile                    # setup · test · check(-host) · apply(-host) · patch-status
+└── Makefile                    # setup · test · rules · check(-host) · apply(-host) · patch-status
 ```
 
 ## Verification
@@ -269,7 +297,7 @@ Commands and results: [verification](docs/verification.md).
 - [ ] Molecule scenarios to converge each role in a container in CI
 - [ ] Tailscale ACLs as code (`policy.hujson` + GitOps action): limit the subnet route to SSH and HTTPS, and stop lab → tailnet traffic
 - [ ] VLANs on a managed switch: separate trust zones for compute and services
-- [ ] Alerting (Alertmanager) for disk, NFS and Slurm node state
+- [x] Alerting to the owner's phone for machines, disks, patching, Slurm, NFS, certificates and the GPU, with a watchdog on the monitoring itself (2026-11-23)
 - [ ] Encrypted off-host backups of node state
 - [x] `authorized_keys` managed exclusively, so a key Ansible does not know about is removed instead of kept (2026-11-23)
 - [ ] The NFS client mounts and the Docker Compose stacks as roles

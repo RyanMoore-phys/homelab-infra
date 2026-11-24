@@ -13,3 +13,4 @@ decided, what it costs, and what was rejected. Format after Michael Nygard.
 | [0006](0006-services-are-not-slurm-jobs.md) | Long-running services are not Slurm jobs | Accepted |
 | [0007](0007-gateway-joins-slurm.md) | The gateway joins Slurm, uncapped, with its GPU and the NFS share | Accepted |
 | [0008](0008-unattended-patching-and-drained-reboots.md) | Unattended patching, including outside repositories; nodes reboot through Slurm after their jobs | Accepted |
+| [0009](0009-alerting-through-self-hosted-ntfy.md) | Alerts reach the phone through a self-hosted ntfy on the gateway, with a watchdog for monitoring itself | Accepted |
